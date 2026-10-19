@@ -370,7 +370,7 @@ namespace Test
             TestSetup(KeyMode.Vi);
 
             TestMustDing("", Keys(
-                _.Escape, "W" 
+                _.Escape, "W"
             ));
         }
 
@@ -423,6 +423,11 @@ namespace Test
         [SkippableFact]
         public void ViGotoBrace()
         {
+            // NOTE: When the input has unmatched braces, in order to avoid an
+            // exception caused by AcceptLineImpl waiting for incomplete input,
+            // the test needs to end with the Vi command "ddi" and assert that
+            // the result is an empty string.
+
             TestSetup(KeyMode.Vi);
 
             Test("0[2(4{6]8)a}c", Keys(
@@ -450,9 +455,64 @@ namespace Test
                     CheckThat(() => AssertCursorLeftIs(4)),
                     _.Percent,
                     CheckThat(() => AssertCursorLeftIs(4)),
-                    "ddi"
+                    "ddi" // Unmatched brace
                     ));
             }
+
+            // Tests when the cursor is not on any paren
+            foreach (var (opening, closing) in new[] { ('(', ')'), ('{', '}'), ('[', ']') })
+            {
+                // Closing paren with backward match
+                string input1 = $"0{opening}2{opening}4foo{closing}";
+                Test("", Keys(
+                    input1,
+                    CheckThat(() => AssertCursorLeftIs(9)),
+                    _.Escape, CheckThat(() => AssertCursorLeftIs(8)),
+                    "0ff", CheckThat(() => AssertCursorLeftIs(5)),
+                    _.Percent, CheckThat(() => AssertCursorLeftIs(3)),
+                    _.Percent, CheckThat(() => AssertCursorLeftIs(8)),
+                    "ddi" // Unmatched closing brace
+                ));
+
+                // Closing paren without backward match
+                string input2 = $"0]2)4foo{closing}";
+                TestMustDing(input2, Keys(
+                    input2,
+                    CheckThat(() => AssertCursorLeftIs(9)),
+                    _.Escape, CheckThat(() => AssertCursorLeftIs(8)),
+                    "0ff", CheckThat(() => AssertCursorLeftIs(5)),
+                    _.Percent, CheckThat(() => AssertCursorLeftIs(5)), // stay still
+                    _.Percent, CheckThat(() => AssertCursorLeftIs(5))
+                ));
+
+                // Opening paren with forward match
+                string input3 = $"0{opening}2foo6{closing}";
+                Test(input3, Keys(
+                    input3,
+                    CheckThat(() => AssertCursorLeftIs(8)),
+                    _.Escape, CheckThat(() => AssertCursorLeftIs(7)),
+                    "0ff", CheckThat(() => AssertCursorLeftIs(3)),
+                    _.Percent, CheckThat(() => AssertCursorLeftIs(1)),
+                    _.Percent, CheckThat(() => AssertCursorLeftIs(7))
+                ));
+
+                // Opening paren without forward match
+                string input4 = $"0)2]4foo{opening}(";
+                TestMustDing("", Keys(
+                    input4,
+                    CheckThat(() => AssertCursorLeftIs(10)),
+                    _.Escape, CheckThat(() => AssertCursorLeftIs(9)),
+                    "0ff", CheckThat(() => AssertCursorLeftIs(5)),
+                    _.Percent, CheckThat(() => AssertCursorLeftIs(5)), // stay still
+                    _.Percent, CheckThat(() => AssertCursorLeftIs(5)),
+                    "ddi" // Unmatched brace
+                ));
+            }
+
+            // <%> with empty text buffer should work fine.
+            Test("", Keys(
+                _.Escape, _.Percent,
+                CheckThat(() => AssertCursorLeftIs(0))));
         }
 
         [SkippableFact]
@@ -615,25 +675,25 @@ namespace Test
             Test("", Keys(
                 "abcdefg", _.Escape, CheckThat(() => AssertLineIs("abcdefg")),
                 "0dfg", CheckThat(() => AssertLineIs("")),
-                'u', CheckThat(() => AssertLineIs("abcdefg")), CheckThat(() => AssertCursorLeftIs(6)),
+                'u', CheckThat(() => AssertLineIs("abcdefg")), CheckThat(() => AssertCursorLeftIs(0)),
                 "0dff", CheckThat(() => AssertLineIs("g")),
-                'u', CheckThat(() => AssertLineIs("abcdefg")), CheckThat(() => AssertCursorLeftIs(6)),
+                'u', CheckThat(() => AssertLineIs("abcdefg")), CheckThat(() => AssertCursorLeftIs(0)),
                 "0dfg"
                 ));
 
-            Test("g", Keys(
+            Test("bcdefg", Keys(
                 "abcdefg", _.Escape, CheckThat(() => AssertLineIs("abcdefg")),
                 "dFa", _.Escape, CheckThat(() => AssertLineIs("g")),
-                'u', CheckThat(() => AssertCursorLeftIs(6)),
-                "dFb", CheckThat(() => AssertLineIs("ag")),
-                'u', CheckThat(() => AssertCursorLeftIs(6)),
+                'u', CheckThat(() => AssertCursorLeftIs(0)),
+                "$dFb", CheckThat(() => AssertLineIs("ag")),
+                'u', CheckThat(() => AssertCursorLeftIs(1)),
                 "dFa"
                 ));
 
             Test("0123456", Keys(
                 "0123456", _.Escape, CheckThat(() => AssertLineIs("0123456")),
                 "0dt6", CheckThat(() => AssertLineIs("6")),
-                'u', CheckThat(() => AssertLineIs("0123456")), CheckThat(() => AssertCursorLeftIs(6)),
+                'u', CheckThat(() => AssertLineIs("0123456")), CheckThat(() => AssertCursorLeftIs(0)),
                 "0dt5", CheckThat(() => AssertLineIs("56")),
                 'u', CheckThat(() => AssertLineIs("0123456")),
                 "0ldt6", CheckThat(() => AssertLineIs("06")),
@@ -645,9 +705,9 @@ namespace Test
             Test("0123456", Keys(
                 "0123456", _.Escape, CheckThat(() => AssertLineIs("0123456")),
                 "dT0", CheckThat(() => AssertLineIs("06")),
-                'u', CheckThat(() => AssertLineIs("0123456")), CheckThat(() => AssertCursorLeftIs(6)),
-                "hdT0", CheckThat(() => AssertLineIs("056")),
-                'u', CheckThat(() => AssertLineIs("0123456")), CheckThat(() => AssertCursorLeftIs(5)),
+                'u', CheckThat(() => AssertLineIs("0123456")), CheckThat(() => AssertCursorLeftIs(1)),
+                "$hdT0", CheckThat(() => AssertLineIs("056")),
+                'u', CheckThat(() => AssertLineIs("0123456")), CheckThat(() => AssertCursorLeftIs(1)),
                 "0dT0"
                 ));
         }
@@ -659,6 +719,18 @@ namespace Test
 
             Test("", Keys(
                 _.Escape, "kjw"
+                ));
+        }
+
+        [SkippableFact]
+        public void ViDefect1673()
+        {
+            TestSetup(KeyMode.Vi);
+
+            Test("one", Keys(
+                "one", _.Escape, _.D0,
+                _.x, CheckThat(() => AssertLineIs("ne")),
+                _.u, CheckThat(() => AssertCursorLeftIs(0))
                 ));
         }
     }

@@ -1,3 +1,279 @@
+### [2.4.5] - 2025-10-22
+
+- Replace `DOTNET_SKIP_FIRST_TIME_EXPERIENCE` with `DOTNET_NOLOGO` (#4916) (Thanks @xtqqczze!)
+- Add the `ScreenReaderModeEnabled` property to formatting (#4970)
+- Fix a null reference exception when showing parameter help (#4971)
+
+[2.4.5]: https://github.com/PowerShell/PSReadLine/compare/v2.4.4-beta4...v2.4.5
+
+### [2.4.4-beta4] - 2025-08-28
+
+- Fix `IsMutexPresent()` to avoid incorrect use of `GetLastWin32Error()` (#4910)
+- Add screen reader support to PSReadLine (#4854)
+
+[2.4.4-beta4]: https://github.com/PowerShell/PSReadLine/compare/v2.4.3-beta3...v2.4.4-beta4
+
+### [2.4.3-beta3] - 2025-07-23
+
+- Allow accepting the current input automatically from within an `OnIdle` event handler (#4830)
+- Add VS Code tasks and debug config (#4834, #4855)
+- Add bound check for the cursor top value to `InvokePrompt` (#4791) (Thanks @jftkcs!)
+- Fix typo in `SamplePSReadLineProfile.ps1` (#4725) (Thanks @mahir-cadirci!)
+- Fix line ending and cache some reflection operations (#4709)
+- Improve test reliability by making sure the PSReadLine one-time initialization is done (#4686) (Thanks @springcomp!)
+
+[2.4.3-beta3]: https://github.com/PowerShell/PSReadLine/compare/v2.4.2-beta2...v2.4.3-beta3
+
+### [2.4.2-beta2] - 2025-04-16
+
+- Add a private field to indicate if PSReadLine is initialized and ready (#4706)
+- Use CFS for installing module and deploy box for module publish (#4700)
+
+[2.4.2-beta2]: https://github.com/PowerShell/PSReadLine/compare/v2.4.1-beta1...v2.4.2-beta2
+
+### [2.4.1-beta1] - 2025-02-28
+
+#### Code Changes
+
+- Avoid querying for cursor position when it's not necessary (#4448)
+- Handle buffer changes made by an event handler (#4442)
+- Update `SelectCommandArgument` to properly handle POSIX style options for CLI commands (#4016)
+
+#### Build Changes
+
+- Update PSReadLine build to target `netstandard2.0` (#4584)
+- Update documentation about the building of PSReadLine (#4286) (Thanks @sangafabrice!)
+- Update `HelpInfoUri` for 7.5 (#4284)
+- Update the release pipeline to remove `AzFeed` from display name (#4204)
+- Update the OneBranch pipeline to keep it compliant and remove SBOM files from module (#4201)
+- Make sure the `CodeQL` result from release pipeline gets uploaded (#4082)
+- Add 'ob_restore_phase' for every task before the signing task to work around the signing issue (#4046)
+- Change the NuGet feed to use the governed PowerShell feed (#4044)
+- Update "Code of Conduct" and "Security Policy" (#4037)
+- Disable SBOM, signing, and codeQL for the publish job (#3986)
+- Update triage messages to use the latest stable version (#3985)
+- Fix the release stage and update the changelog for v2.3.5 servicing release (#3984)
+- Add the release stage to the pipeline and exclude test folders from Component Governance (#3982)
+- Change back to 'external_distribution' for nupkg signing (#3977)
+- Migrate PSReadLine release build pipeline to OneBranch (#3975)
+
+[2.4.1-beta1]: https://github.com/PowerShell/PSReadLine/compare/v2.4.0-beta0...v2.4.1-beta1
+
+### [2.4.0-beta0] - 2024-03-01
+
+- Fix the null-reference exception when running `Debug-Job` on a thread job (#3957)
+- Add needed permission to the workflow (#3944, #3945, #3946)
+- Fix copying text to system clipboard on Linux using xclip (#3937)
+- Use the correct directory separator for tab completion based on the platform we are working with (#3935)
+- Update the minimal PS version required to be 5.1 (#3936)
+- Little code style cleanup for the `GetCompletions()` method (#3898)
+- Stop trying to de-duplicate completion results (#3897)
+- Windows keyboard layout handling: get the current layout from the parent terminal process (#3786) (Thanks @ForNeVeR!)
+- Add "resolution no activity" label to the bot-close list (#3852)
+- Fix a few VI key handlers to close edit group properly (#3845)
+- Update the documentation issue template to point to the PowerShell-Doc repo (#3839, #3840, #3841)
+- Handle large history file properly by reading lines in the streaming way (#3810)
+- Update build script to always include the `ProjectUri` info (#3821)
+
+[2.4.0-beta0]: https://github.com/PowerShell/PSReadLine/compare/v2.3.4...v2.4.0-beta0
+
+### [2.3.6] - 2024-10-02
+
+This is a servicing release that excludes SBOM files from the module.
+
+- Update the OneBranch pipeline to keep it compliant and remove SBOM files from module (#4201)
+- Make sure the `CodeQL` result from release pipeline gets uploaded (#4082)
+- Add 'ob_restore_phase' for every task before the signing task to work around the signing issue (#4046)
+- Change the NuGet feed to use the governed PowerShell feed (#4044)
+- Disable SBOM, signing, and codeQL for the publish job (#3986)
+
+[2.3.6]: https://github.com/PowerShell/PSReadLine/compare/v2.3.5...v2.3.6
+
+### [2.3.5] - 2024-04-02
+
+This is a servicing release that excludes test components from SBOM generation.
+
+- Add the release stage to the pipeline and exclude test folders from Component Governance (#3982)
+- Change back to 'external_distribution' for nupkg signing (#3977)
+- Migrate PSReadLine release build pipeline to OneBranch (#3975)
+- Fix the null-reference exception when running `Debug-Job` on a thread job (#3957)
+- Update build script to always include the `ProjectUri` info (#3821)
+
+[2.3.5]: https://github.com/PowerShell/PSReadLine/compare/v2.3.4...v2.3.5
+
+### [2.3.4] - 2023-10-02
+
+- Choose the inline prediction color based on the environment (#3808)
+- Update the stable version of PSReadLine used in the auto triage messages (#3804)
+- Update `Compliance_Job` to add a new variable group for APIScan (#3803)
+
+[2.3.4]: https://github.com/PowerShell/PSReadLine/compare/v2.3.3...v2.3.4
+
+### [2.3.3] - 2023-09-18
+
+- Re-package the `2.3.2-beta2` version to `2.3.3` as an official stable release.
+
+[2.3.3]: https://github.com/PowerShell/PSReadLine/compare/v2.3.2-beta2...v2.3.3
+
+### [2.3.2-beta2] - 2023-08-17
+
+- Work around `InvalidOperationException` from Console API (#3755) (Thanks @jazzdelightsme!)
+- Add the `TerminateOrphanedConsoleApps` option on Windows to kill orphaned console-attached process that may mess up reading from Console input (#3764) (Thanks @jazzdelightsme!)
+- Fix bot to add `needs-triage` label to newly opened issue (#3772)
+- Update `actions/checkout` used in GitHub action to v3 (#3773)
+- Supports the text-object command `diw` in the VI edit mode (#2059) (Thanks @springcomp!)
+- Fix `NullReferenceException` when processing event subscribers (#3781)
+- Point to `F7History` in the comment of the `F7` key-binding sample (#3782)
+
+[2.3.2-beta2]: https://github.com/PowerShell/PSReadLine/compare/v2.3.1-beta1...v2.3.2-beta2
+
+### [2.3.1-beta1] - 2023-05-03
+
+- Append reset VT sequence before rendering the ineline prediction (#3669)
+- Support tooltip rendering in the prediction list view (#3667, #3671)
+- Fix the broken doc link about `PowerShellGet` (#3657) (Thanks @vimode!)
+- Add a sample for transforming Unicode code point to Unicode char by `Alt+x` (#3652)
+- Avoid running `AddToHistoryHandler` on command lines loaded from history file (#3643)
+- Force refreshing suggestion in the inline view when plugin is in use (#3644)
+- Improve the sensitive history scrubbing to allow retrieving token from `az`, `gcloud`, and `kubectl` (#3641)
+- Set the current location in `PredictionClient` when it's supported (#3639)
+- Improve the default sensitive history scrubbing to allow safe property access (#3630)
+- Make PSReadLine script hidden from debugger (#3629)
+
+[2.3.1-beta1]: https://github.com/PowerShell/PSReadLine/compare/v2.3.0-beta0...v2.3.1-beta1
+
+### [2.3.0-beta0] - 2023-03-07
+
+- Fix the menu completion to better handle the backspace key (#3574)
+- Improve the list view to be scrollable and auto-adjust the list view height (#3583)
+- Use 'Visual Studio 2022' as the image for `appveyor` CI (#3594)
+- Fix some typos in this repository (#3547) (Thanks @spaette!)
+- De-duplicate prediction results with the history results (#3543)
+- Updating Fabric bot (#3540, #3576)
+- Change default color for inline prediction to `dim` (#3493)
+- Make tab completion show results whose `ListItemText` are different by case only (#3456) (Thanks @dkaszews!)
+- Fix to use the default member color for members (#3450)
+- Update the samples in README.md (#3440, #3424)
+- Place 'ViDGChord' in the right group (#3422)
+- Fix the description of `CapitalizeWord` (#3384)
+- Add support for upcasing, downcasing, and capitalizing word (#3365) (Thanks @3N4N!)
+- No list view prediction when the first line was scrolled up off the buffer (#3372)
+- Fix wrong cursor position in menu completion (#3373)
+- Fix `ViModeIndicator = Cursor` for Windows Terminal (#3374)
+- Fix parameter dynamic help when the help content is specified in ParameterAttribute (#3370)
+- Handle multi-line description for parameter help content (#3358)
+- Update module version in bot messages (#3361)
+
+[2.3.0-beta0]: https://github.com/PowerShell/PSReadLine/compare/v2.2.6...v2.3.0-beta0
+
+### [2.2.6] - 2022-06-27
+
+- Enable Predictive Intellisense by default (#3351)
+
+[2.2.6]: https://github.com/PowerShell/PSReadLine/compare/v2.2.5...v2.2.6
+
+### [2.2.5] - 2022-05-03
+
+- Re-package the `2.2.4-beta1` version to `2.2.5` as an official servicing release.
+
+[2.2.5]: https://github.com/PowerShell/PSReadLine/compare/v2.2.4-beta1...v2.2.5
+
+### [2.2.4-beta1] - 2022-04-27
+
+- Sync ReadKeyProc thread with pipeline thread (#3294)
+- Update build to use net462 (#3285)
+
+[2.2.4-beta1]: https://github.com/PowerShell/PSReadLine/compare/v2.2.3...v2.2.4-beta1
+
+### [2.2.3] - 2022-04-20
+
+- Respect cancellation in `ReadOneOrMoreKeys()` (#3274, #3280)
+
+[2.2.3]: https://github.com/PowerShell/PSReadLine/compare/v2.2.2...v2.2.3
+
+### [2.2.2] - 2022-02-22
+
+- Update to use the 1.0.0 version of `Microsoft.PowerShell.Pager` (#3206)
+- No need to clear lines when it's not a menu completion rendering (#3199)
+
+[2.2.2]: https://github.com/PowerShell/PSReadLine/compare/v2.2.1-rc1...v2.2.2
+
+### [2.2.1-rc1] - 2022-01-28
+
+- Update build agent to use `PSMMS2019-Secure` per requirement (#3174, #3187)
+- Update the `HelpInfoURI` to point to the latest help content (#3171)
+- Update the version of PowerShell nuget packages to 7.2.0 (#3170)
+- Update `README.md` with updated links to content helping get set up (#3149, #3152) (Thanks @cgorshing!)
+- Make `Ctrl+r` and `Ctrl+s` in `Vi` edit mode work the same way as in `Emacs` edit mode (#3148) (Thanks @davetapley!)
+- Make `HistorySearchBackward` and `HistorySearchForward` able to navigate the list view (#3144)
+
+[2.2.1-rc1]: https://github.com/PowerShell/PSReadLine/compare/v2.2.0-beta5...v2.2.1-rc1
+
+### [2.2.0-beta5] - 2022-01-05
+
+- Improve `RecomputeInitialCoords` to be more robust and handle a couple special cases (#3074)
+- Add `BasicScrollingConsole` to support test cases for scrolling up scenarios (#3081)
+- Fix the regex matching in the issue-triage script (#3082, #3110, #3113)
+- Skip the AST analysis when command-line input has any parsing errors (#3075)
+- Trigger the GitHub action by issue-open event (#3041)
+- Fix the double quotes in the comment text for duplicate-issue handling (#3029, #3030)
+- Update GitHub action to handle the `TypeLoadException` issue (#3025)
+- Handle screen buffer scrolling correctly for inline dynamic help (#2951)
+- Fix 2 menu completion issues that happen when we need to scroll screen buffer (#2949)
+
+[2.2.0-beta5]: https://github.com/PowerShell/PSReadLine/compare/v2.2.0-beta4...v2.2.0-beta5
+
+### [2.2.0-beta4] - 2021-10-27
+
+- Generate `OnIdle` event only if the editing buffer is empty (#2934)
+- Add private contract delegate for PSES to handle idle (#1679)
+- Disable warning for the private contract field used by PSES (#2935)
+- Reset all ANSI attributes before changing color in rendering to avoid color leaking (#2925)
+- Make the default sensitive history scrubbing function a little smarter (#2921)
+- Generate ADO SBOM for PSReadLine (#2918)
+- Update the issue templates to use form templates (#2898, #2900, #2917)
+- Update the inline suggestion rendering to not exceed the max window buffer (#2892)
+- VI Mode: "Undo" now leaves the cursor under the position at the start of the deletion (#2045) (Thanks @springcomp!)
+- Update `CreateCharInfoBuffer` to support continuous 'NextLineToken' (#2880)
+- Fix `GotoBrace` to handle the case when the text buffer is empty (#2879)
+- Fix rendering when continuation prompt is an empty string (#2875)
+- Release mutex when facing `AbandonedMutexException` (#2867)
+- Migrate the release build to use the 1ES agent pool and also fix the API scan (#2859)
+- Pass the cancellation token along instead of using the default one (#2636)
+- Don't ignore `ConsoleKey.Packet` type as that is simply Unicode (#2632)
+
+[2.2.0-beta4]: https://github.com/PowerShell/PSReadLine/compare/v2.2.0-beta3...v2.2.0-beta4
+
+### [2.2.0-beta3] - 2021-06-01
+
+- Update the use of the prediction interface to adapt to the breaking changes introduced in PowerShell 7.2.0-preview.6 (#2524)
+- Fix a null-ref exception in `DynamicHelpImpl` (#2292)
+
+[2.2.0-beta3]: https://github.com/PowerShell/PSReadLine/compare/v2.2.0-beta2...v2.2.0-beta3
+
+### [2.2.0-beta2] - 2021-02-23
+
+- Update PSReadLine corresponding to the prediction interface updates (#2225)
+- Add white spaces to the emacs dispatch table (#2223)
+- Add the `SelectCommandArgument` bind-able function (#2222) (Thanks @ThePSAdmin for the idea!)
+- Move prediction functions to a new group (#2211)
+- Remove `LineIsMultiline` in favor of multi-line agnostic algorithms (#1125) (#2047) (Thanks @springcomp!)
+- Add the "Dynamic Help" feature to PSReadLine (#1777)
+- Prevent crash in `GotoFirstNonBlankOfLine` (#2050) (#2051) (Thanks @springcomp!)
+- Refactor the usage of `_clipboard` (#2022) (Thanks @springcomp!)
+- Make `d0` to delete to the start of the current logical line in a multiline buffer in VI mode (#2002) (Thanks @springcomp!)
+- Add github action to pre-triage new issues (#2117, #2118)
+- Highlight the install command in README.md (#2088) (Thanks @jiriurban21!)
+- Deleting backward to or until a character should preserve the character under the cursor (#2007) (Thanks @springcomp!)
+- Use `d^` to delete from the first non-blank character of a logical line (#2001) (Thanks @springcomp!)
+- Update nuget.config based on guidance (#2003)
+- Update the release build to use ESRP signing and unify the compliance job (#1983)
+- Add readonly modifier to some private fields (#1984)
+- Add argument selection handler to the sample profile (#1947) (Thanks @ThePSAdmin!)
+- Fix three issues with the menu completion (#1946)
+
+[2.2.0-beta2]: https://github.com/PowerShell/PSReadLine/compare/v2.2.0-beta1...v2.2.0-beta2
+
 ### Version 2.2.0-beta1
 
 Changes:
@@ -277,7 +553,7 @@ Bug fixes:
 * Fix InvokePrompt when the prompt is > 1 line.
 * Fix YankToPercent off by 1 error.
 * Fix error reported when running in container.
-* Catch and ignore execptions in InvokePrompt (#583)
+* Catch and ignore exceptions in InvokePrompt (#583)
 * Get new completions on 2nd tab if 1st had 1 result (#238)
 * Tab replaced with 4 spaces during paste (#144)
 * Fix rendering after buffer resize (#418)
@@ -562,7 +838,7 @@ New features:
 * Add ETW event source for demo mode, key logger, macro recorder etc.
 * Undo/redo
 * Get-PSReadLineOption cmdlet
-* Make specifying key handlers for builtins simpler
+* Make specifying key handlers for built-ins simpler
 * Current un-entered line is saved and recalled when cycling through history
 * Support syntax coloring of member names
 

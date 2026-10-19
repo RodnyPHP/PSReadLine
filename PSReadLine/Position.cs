@@ -11,28 +11,17 @@ namespace Microsoft.PowerShell
         /// <param name="current">The position in the current logical line.</param>
         private static int GetBeginningOfLinePos(int current)
         {
-            var newCurrent = current;
-
-            if (_singleton.LineIsMultiLine())
+            int i = Math.Max(0, current);
+            while (i > 0)
             {
-                int i = Math.Max(0, current);
-                while (i > 0)
+                if (_singleton._buffer[--i] == '\n')
                 {
-                    if (_singleton._buffer[--i] == '\n')
-                    {
-                        i += 1;
-                        break;
-                    }
+                    i += 1;
+                    break;
                 }
-
-                newCurrent = i;
-            }
-            else
-            {
-                newCurrent = 0;
             }
 
-            return newCurrent;
+            return i;
         }
 
         /// <summary>
@@ -113,23 +102,14 @@ namespace Microsoft.PowerShell
             var beginningOfLine = GetBeginningOfLinePos(current);
 
             var newCurrent = beginningOfLine;
+            var buffer = _singleton._buffer;
 
-            while (IsVisibleBlank(newCurrent))
+            while (newCurrent < buffer.Length && buffer.IsVisibleBlank(newCurrent))
             {
                 newCurrent++;
             }
 
             return newCurrent;
-        }
-
-        private static bool IsVisibleBlank(int newCurrent)
-        {
-            var c = _singleton._buffer[newCurrent];
-
-            // [:blank:] of vim's pattern matching behavior
-            // defines blanks as SPACE and TAB characters.
-
-            return c == ' ' || c == '\t';
         }
     }
 }

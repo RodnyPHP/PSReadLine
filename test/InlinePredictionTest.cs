@@ -2,7 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Management.Automation.Language;
-using System.Management.Automation.Subsystem;
+using System.Management.Automation.Subsystem.Prediction;
 using System.Reflection;
 using Microsoft.PowerShell;
 using Xunit;
@@ -14,6 +14,8 @@ namespace Test
         [SkippableFact]
         public void Inline_RenderSuggestion()
         {
+            Skip.If(ScreenReaderModeEnabled, "Inline predictions are not supported in screen reader mode.");
+
             TestSetup(KeyMode.Cmd,
                       new KeyHandler("Ctrl+f", PSConsoleReadLine.ForwardWord));
             using var disp = SetPrediction(PredictionSource.History, PredictionViewStyle.InlineView);
@@ -92,6 +94,8 @@ namespace Test
         [SkippableFact]
         public void Inline_CustomKeyBindingsToAcceptSuggestion()
         {
+            Skip.If(ScreenReaderModeEnabled, "Inline predictions are not supported in screen reader mode.");
+
             TestSetup(KeyMode.Cmd,
                       new KeyHandler("Alt+g", PSConsoleReadLine.AcceptSuggestion),
                       new KeyHandler("Alt+f", PSConsoleReadLine.AcceptNextSuggestionWord));
@@ -156,6 +160,8 @@ namespace Test
         [SkippableFact]
         public void Inline_AcceptNextSuggestionWordCanAcceptMoreThanOneWords()
         {
+            Skip.If(ScreenReaderModeEnabled, "Inline predictions are not supported in screen reader mode.");
+
             TestSetup(KeyMode.Cmd,
                       new KeyHandler("Ctrl+f", PSConsoleReadLine.ForwardWord),
                       new KeyHandler("Alt+f", PSConsoleReadLine.AcceptNextSuggestionWord));
@@ -192,6 +198,8 @@ namespace Test
         [SkippableFact]
         public void Inline_AcceptSuggestionWithSelection()
         {
+            Skip.If(ScreenReaderModeEnabled, "Inline predictions are not supported in screen reader mode.");
+
             TestSetup(KeyMode.Cmd,
                       new KeyHandler("Ctrl+f", PSConsoleReadLine.ForwardWord));
             using var disp = SetPrediction(PredictionSource.History, PredictionViewStyle.InlineView);
@@ -261,6 +269,8 @@ namespace Test
         [SkippableFact]
         public void Inline_SetPredictionColor()
         {
+            Skip.If(ScreenReaderModeEnabled, "Inline predictions are not supported in screen reader mode.");
+
             TestSetup(KeyMode.Cmd);
             var predictionColor = MakeCombinedColor(ConsoleColor.DarkYellow, ConsoleColor.Yellow);
             var predictionColorToCheck = Tuple.Create(ConsoleColor.DarkYellow, ConsoleColor.Yellow);
@@ -288,6 +298,8 @@ namespace Test
         [SkippableFact]
         public void Inline_HistoryEditsCanUndoProperly()
         {
+            Skip.If(ScreenReaderModeEnabled, "Inline predictions are not supported in screen reader mode.");
+
             TestSetup(KeyMode.Cmd,
                       new KeyHandler("Ctrl+f", PSConsoleReadLine.ForwardWord));
             SetHistory("git checkout -b branch origin/bbbb");
@@ -320,6 +332,8 @@ namespace Test
         [SkippableFact]
         public void Inline_AcceptSuggestionInVIMode()
         {
+            Skip.If(ScreenReaderModeEnabled, "Inline predictions are not supported in screen reader mode.");
+
             TestSetup(KeyMode.Vi);
             using var disp = SetPrediction(PredictionSource.History, PredictionViewStyle.InlineView);
 
@@ -364,8 +378,43 @@ namespace Test
             ));
         }
 
+        [SkippableFact]
+        public void ViDefect2408()
+        {
+            Skip.If(ScreenReaderModeEnabled, "Inline predictions are not supported in screen reader mode.");
+
+            TestSetup(KeyMode.Vi);
+            using var disp = SetPrediction(PredictionSource.History, PredictionViewStyle.InlineView);
+
+            SetHistory("echo -bar");
+            Test("ech", Keys(
+                "abcd",
+                CheckThat(() => AssertScreenIs(1,
+                    TokenClassification.Command, "abcd")),
+                _.Escape, 'S',
+                CheckThat(() => AssertLineIs(string.Empty)),
+                CheckThat(() => AssertCursorLeftIs(0)),
+                "ech",
+                CheckThat(() => AssertScreenIs(1,
+                    TokenClassification.Command, "ech",
+                    TokenClassification.InlinePrediction, "o -bar")),
+                _.RightArrow,
+                CheckThat(() => AssertScreenIs(1,
+                    TokenClassification.Command, "echo",
+                    TokenClassification.None, ' ',
+                    TokenClassification.Parameter, "-bar")),
+                CheckThat(() => AssertCursorLeftIs(9)),
+                _.Ctrl_z,
+                CheckThat(() => AssertScreenIs(1,
+                    TokenClassification.Command, "ech",
+                    TokenClassification.InlinePrediction, "o -bar"))));
+        }
+
+        private const uint MiniSessionId = 56;
+        private static readonly Guid predictorId_0 = Guid.Parse("c69fa9fc-6157-4877-8cf4-a9c83a0128af");
         private static readonly Guid predictorId_1 = Guid.Parse("b45b5fbe-90fa-486c-9c87-e7940fdd6273");
         private static readonly Guid predictorId_2 = Guid.Parse("74a86463-033b-44a3-b386-41ee191c94be");
+        private static readonly Guid predictorId_3 = Guid.Parse("19e98622-99e0-41f7-9ee0-a8bed92cde51");
 
         /// <summary>
         /// Mocked implementation of 'PredictInput'.
@@ -374,12 +423,26 @@ namespace Test
         {
             var ctor = typeof(PredictionResult).GetConstructor(
                 BindingFlags.NonPublic | BindingFlags.Instance, null,
-                new[] { typeof(Guid), typeof(string), typeof(List<PredictiveSuggestion>) }, null);
+                new[] { typeof(Guid), typeof(string), typeof(uint), typeof(List<PredictiveSuggestion>) }, null);
 
             var input = ast.Extent.Text;
-            if (input == "netsh")
+            if (input is "netsh")
             {
                 return null;
+            }
+            else if (input is "tooltip")
+            {
+                var suggestions_0 = new List<PredictiveSuggestion>
+                {
+                    new PredictiveSuggestion("tooltip NO1", "Hello\nBinary\nWorld\nPowerShell is a task automation and configuration management program from Microsoft"),
+                    new PredictiveSuggestion("tooltip NO2", "Hello\nWorld"),
+                };
+
+                return new List<PredictionResult>
+                {
+                    (PredictionResult)ctor.Invoke(
+                        new object[] { predictorId_0, "Tooltip", MiniSessionId, suggestions_0 }),
+                };
             }
 
             var suggestions_1 = new List<PredictiveSuggestion>
@@ -392,18 +455,29 @@ namespace Test
                 new PredictiveSuggestion($"SOME NEW TEXT"),
             };
 
-            return new List<PredictionResult>
+            var result = new List<PredictionResult>
             {
                 (PredictionResult)ctor.Invoke(
-                    new object[] { predictorId_1, "TestPredictor", suggestions_1 }),
+                    new object[] { predictorId_1, "TestPredictor", MiniSessionId, suggestions_1 }),
                 (PredictionResult)ctor.Invoke(
-                    new object[] { predictorId_2, "LongNamePredictor", suggestions_2 }),
+                    new object[] { predictorId_2, "LongNamePredictor", MiniSessionId, suggestions_2 }),
             };
+
+            // Return an extra source if it's for testing the metadata line.
+            if (input == "metadata-line")
+            {
+                result.Add((PredictionResult)ctor.Invoke(
+                    new object[] { predictorId_3, "Metadata", MiniSessionId, suggestions_2 }));
+            }
+
+            return result;
         }
 
         [SkippableFact]
         public void Inline_PluginSource_Acceptance()
         {
+            Skip.If(ScreenReaderModeEnabled, "Inline predictions are not supported in screen reader mode.");
+
             // Using the 'Plugin' source will make PSReadLine get prediction from the plugin only.
             TestSetup(KeyMode.Cmd,
                       new KeyHandler("Ctrl+f", PSConsoleReadLine.ForwardWord));
@@ -416,11 +490,15 @@ namespace Test
                 "git", CheckThat(() => AssertScreenIs(1,
                     TokenClassification.Command, "git",
                     TokenClassification.InlinePrediction, " SOME TEXT AFTER")),
+                // `OnSuggestionDisplayed` should be fired for only one predictor because we are in 'inline' view.
+                CheckThat(() => AssertDisplayedSuggestions(count: 1, predictorId_1, MiniSessionId, -1)),
+                CheckThat(() => _mockedMethods.ClearPredictionFields()),
                 // 'ctrl+f' will trigger 'OnSuggestionAccepted'.
                 _.Ctrl_f, CheckThat(() => AssertScreenIs(1,
                     TokenClassification.Command, "git",
                     TokenClassification.None, " SOME ",
                     TokenClassification.InlinePrediction, "TEXT AFTER")),
+                CheckThat(() => Assert.Empty(_mockedMethods.displayedSuggestions)),
                 CheckThat(() => Assert.Equal(predictorId_1, _mockedMethods.acceptedPredictorId)),
                 CheckThat(() => Assert.Equal("git SOME TEXT AFTER", _mockedMethods.acceptedSuggestion)),
                 CheckThat(() => Assert.Null(_mockedMethods.commandHistory)),
@@ -430,18 +508,21 @@ namespace Test
                     TokenClassification.Command, "git",
                     TokenClassification.None, " SOME TEXT ",
                     TokenClassification.InlinePrediction, "AFTER")),
+                CheckThat(() => Assert.Empty(_mockedMethods.displayedSuggestions)),
                 CheckThat(() => Assert.Equal(Guid.Empty, _mockedMethods.acceptedPredictorId)),
                 CheckThat(() => Assert.Null(_mockedMethods.acceptedSuggestion)),
                 CheckThat(() => Assert.Null(_mockedMethods.commandHistory)),
                 _.RightArrow, CheckThat(() => AssertScreenIs(1,
                     TokenClassification.Command, "git",
                     TokenClassification.None, " SOME TEXT AFTER")),
+                CheckThat(() => Assert.Empty(_mockedMethods.displayedSuggestions)),
                 CheckThat(() => Assert.Equal(Guid.Empty, _mockedMethods.acceptedPredictorId)),
                 CheckThat(() => Assert.Null(_mockedMethods.acceptedSuggestion)),
                 CheckThat(() => Assert.Null(_mockedMethods.commandHistory))
             ));
 
             // 'Enter' will trigger 'OnCommandLineAccepted'.
+            Assert.Empty(_mockedMethods.displayedSuggestions);
             Assert.Equal(Guid.Empty, _mockedMethods.acceptedPredictorId);
             Assert.Null(_mockedMethods.acceptedSuggestion);
             Assert.NotNull(_mockedMethods.commandHistory);
@@ -458,6 +539,8 @@ namespace Test
             ));
 
             // 'Enter' will trigger 'OnCommandLineAccepted', because plugin is in use.
+            // Also, we still have `OnSuggestionDisplayed` fired, from the typing of each character of `nets`.
+            AssertDisplayedSuggestions(count: 1, predictorId_1, MiniSessionId, -1);
             Assert.Equal(Guid.Empty, _mockedMethods.acceptedPredictorId);
             Assert.Null(_mockedMethods.acceptedSuggestion);
             Assert.NotNull(_mockedMethods.commandHistory);
@@ -469,6 +552,8 @@ namespace Test
         [SkippableFact]
         public void Inline_HistoryAndPluginSource_Acceptance()
         {
+            Skip.If(ScreenReaderModeEnabled, "Inline predictions are not supported in screen reader mode.");
+
             // Using the 'HistoryAndPlugin' source will make PSReadLine get prediction from the plugin and history,
             // and plugin takes precedence.
             TestSetup(KeyMode.Cmd,
@@ -482,10 +567,14 @@ namespace Test
                 "git", CheckThat(() => AssertScreenIs(1,
                     TokenClassification.Command, "git",
                     TokenClassification.InlinePrediction, " SOME TEXT AFTER")),
+                // `OnSuggestionDisplayed` should be fired for only one predictor because we are in 'inline' view.
+                CheckThat(() => AssertDisplayedSuggestions(count: 1, predictorId_1, MiniSessionId, -1)),
+                CheckThat(() => _mockedMethods.ClearPredictionFields()),
                 _.Ctrl_f, CheckThat(() => AssertScreenIs(1,
                     TokenClassification.Command, "git",
                     TokenClassification.None, " SOME ",
                     TokenClassification.InlinePrediction, "TEXT AFTER")),
+                CheckThat(() => Assert.Empty(_mockedMethods.displayedSuggestions)),
                 CheckThat(() => Assert.Equal(predictorId_1, _mockedMethods.acceptedPredictorId)),
                 CheckThat(() => Assert.Equal("git SOME TEXT AFTER", _mockedMethods.acceptedSuggestion)),
                 CheckThat(() => Assert.Null(_mockedMethods.commandHistory)),
@@ -494,17 +583,20 @@ namespace Test
                     TokenClassification.Command, "git",
                     TokenClassification.None, " SOME TEXT ",
                     TokenClassification.InlinePrediction, "AFTER")),
+                CheckThat(() => Assert.Empty(_mockedMethods.displayedSuggestions)),
                 CheckThat(() => Assert.Equal(Guid.Empty, _mockedMethods.acceptedPredictorId)),
                 CheckThat(() => Assert.Null(_mockedMethods.acceptedSuggestion)),
                 CheckThat(() => Assert.Null(_mockedMethods.commandHistory)),
                 _.RightArrow, CheckThat(() => AssertScreenIs(1,
                     TokenClassification.Command, "git",
                     TokenClassification.None, " SOME TEXT AFTER")),
+                CheckThat(() => Assert.Empty(_mockedMethods.displayedSuggestions)),
                 CheckThat(() => Assert.Equal(Guid.Empty, _mockedMethods.acceptedPredictorId)),
                 CheckThat(() => Assert.Null(_mockedMethods.acceptedSuggestion)),
                 CheckThat(() => Assert.Null(_mockedMethods.commandHistory))
             ));
 
+            Assert.Empty(_mockedMethods.displayedSuggestions);
             Assert.Equal(Guid.Empty, _mockedMethods.acceptedPredictorId);
             Assert.Null(_mockedMethods.acceptedSuggestion);
             Assert.NotNull(_mockedMethods.commandHistory);
@@ -520,11 +612,15 @@ namespace Test
                 "netsh", CheckThat(() => AssertScreenIs(1,
                     TokenClassification.Command, "netsh",
                     TokenClassification.InlinePrediction, " show me")),
+                // Yeah, we still have `OnSuggestionDisplayed` fired, from the typing of each character of `nets`.
+                CheckThat(() => AssertDisplayedSuggestions(count: 1, predictorId_1, MiniSessionId, -1)),
+                CheckThat(() => _mockedMethods.ClearPredictionFields()),
                 // 'ctrl+f' won't trigger 'OnSuggestionAccepted' as the suggestion is from history.
                 _.Ctrl_f, CheckThat(() => AssertScreenIs(1,
                     TokenClassification.Command, "netsh",
                     TokenClassification.None, " show ",
                     TokenClassification.InlinePrediction, "me")),
+                CheckThat(() => Assert.Empty(_mockedMethods.displayedSuggestions)),
                 CheckThat(() => Assert.Equal(Guid.Empty, _mockedMethods.acceptedPredictorId)),
                 CheckThat(() => Assert.Null(_mockedMethods.acceptedSuggestion)),
                 CheckThat(() => Assert.Null(_mockedMethods.commandHistory)),
@@ -532,16 +628,216 @@ namespace Test
                 _.RightArrow, CheckThat(() => AssertScreenIs(1,
                     TokenClassification.Command, "netsh",
                     TokenClassification.None, " show me")),
+                CheckThat(() => Assert.Empty(_mockedMethods.displayedSuggestions)),
                 CheckThat(() => Assert.Equal(Guid.Empty, _mockedMethods.acceptedPredictorId)),
                 CheckThat(() => Assert.Null(_mockedMethods.acceptedSuggestion)),
                 CheckThat(() => Assert.Null(_mockedMethods.commandHistory))
             ));
 
+            Assert.Empty(_mockedMethods.displayedSuggestions);
             Assert.Equal(Guid.Empty, _mockedMethods.acceptedPredictorId);
             Assert.Null(_mockedMethods.acceptedSuggestion);
             Assert.NotNull(_mockedMethods.commandHistory);
-            Assert.Equal(1, _mockedMethods.commandHistory.Count);
+            Assert.Single(_mockedMethods.commandHistory);
             Assert.Equal("netsh show me", _mockedMethods.commandHistory[0]);
+
+            _mockedMethods.ClearPredictionFields();
+            SetHistory("netsh show me");
+            Test("netsh  SOME TEXT AFTER", Keys(
+                "netsh", CheckThat(() => AssertScreenIs(1,
+                    TokenClassification.Command, "netsh",
+                    TokenClassification.InlinePrediction, " show me")),
+                // Yeah, we still have `OnSuggestionDisplayed` fired, from the typing of each character of `nets`.
+                CheckThat(() => AssertDisplayedSuggestions(count: 1, predictorId_1, MiniSessionId, countOrIndex: -1)),
+                CheckThat(() => _mockedMethods.ClearPredictionFields()),
+
+                // Now mimic pressing a space key. This will trigger the refreshing of suggestions even though the
+                // current history suggestion still applies to the new input, because plugin is in use and we favor
+                // plugin over history results.
+                ' ', CheckThat(() => AssertScreenIs(1,
+                    TokenClassification.Command, "netsh",
+                    TokenClassification.None, " ",
+                    TokenClassification.InlinePrediction, " SOME TEXT AFTER")),
+                CheckThat(() => AssertDisplayedSuggestions(count: 1, predictorId_1, MiniSessionId, countOrIndex: -1)),
+                CheckThat(() => Assert.Equal(Guid.Empty, _mockedMethods.acceptedPredictorId)),
+                CheckThat(() => Assert.Null(_mockedMethods.acceptedSuggestion)),
+                CheckThat(() => Assert.Null(_mockedMethods.commandHistory)),
+
+                CheckThat(() => _mockedMethods.ClearPredictionFields()),
+                // 'RightArrow' will trigger 'OnSuggestionAccepted' as the suggestion is now from plugin.
+                _.RightArrow, CheckThat(() => AssertScreenIs(1,
+                    TokenClassification.Command, "netsh",
+                    TokenClassification.None, "  SOME TEXT AFTER")),
+                CheckThat(() => Assert.Empty(_mockedMethods.displayedSuggestions)),
+                CheckThat(() => Assert.Equal(predictorId_1, _mockedMethods.acceptedPredictorId)),
+                CheckThat(() => Assert.Equal("netsh  SOME TEXT AFTER", _mockedMethods.acceptedSuggestion)),
+                CheckThat(() => Assert.Null(_mockedMethods.commandHistory))
+            ));
+
+            Assert.Empty(_mockedMethods.displayedSuggestions);
+            Assert.Equal(predictorId_1, _mockedMethods.acceptedPredictorId);
+            Assert.Equal("netsh  SOME TEXT AFTER", _mockedMethods.acceptedSuggestion);
+            Assert.NotNull(_mockedMethods.commandHistory);
+            Assert.Equal(2, _mockedMethods.commandHistory.Count);
+            Assert.Equal("netsh show me", _mockedMethods.commandHistory[0]);
+            Assert.Equal("netsh  SOME TEXT AFTER", _mockedMethods.commandHistory[1]);
+            _mockedMethods.ClearPredictionFields();
+        }
+
+        [SkippableFact]
+        public void Inline_NoneSource_ExecutionStatus()
+        {
+            TestSetup(KeyMode.Cmd);
+            using var disp = SetPrediction(PredictionSource.None, PredictionViewStyle.InlineView);
+
+            // The last accepted command line would be "yay" after this.
+            Test("yay", Keys("yay"));
+            _mockedMethods.ClearPredictionFields();
+
+            // We always pass in 'true' as the execution status of the last command line,
+            // and that feedback will be reported when
+            //  1. the plugin source is in use;
+            //  2. the last accepted command is not a whitespace string.
+            Test("   ", Keys(
+                // Since we set the prediction source to be 'None', this feedback won't be reported.
+                CheckThat(() => Assert.Null(_mockedMethods.lastCommandRunStatus)),
+                "   "));
+
+            Test("abc", Keys(
+                // The prediction source is 'None', and the last accepted command is a whitespace string,
+                // so this feedback won't be reported.
+                CheckThat(() => Assert.Null(_mockedMethods.lastCommandRunStatus)),
+                "abc"));
+
+            Assert.Null(_mockedMethods.lastCommandRunStatus);
+        }
+
+        [SkippableFact]
+        public void Inline_HistorySource_ExecutionStatus()
+        {
+            TestSetup(KeyMode.Cmd);
+            using var disp = SetPrediction(PredictionSource.History, PredictionViewStyle.InlineView);
+
+            // The last accepted command line would be "yay" after this.
+            Test("yay", Keys("yay"));
+            _mockedMethods.ClearPredictionFields();
+
+            // We always pass in 'true' as the execution status of the last command line,
+            // and that feedback will be reported when
+            //  1. the plugin source is in use;
+            //  2. the last accepted command is not a whitespace string.
+            Test("   ", Keys(
+                // Since we set the prediction source to be 'History', this feedback won't be reported.
+                CheckThat(() => Assert.Null(_mockedMethods.lastCommandRunStatus)),
+                "   "));
+
+            Test("abc", Keys(
+                // The plugin source is in use, but the last accepted command is a whitespace string.
+                CheckThat(() => Assert.Null(_mockedMethods.lastCommandRunStatus)),
+                "abc"));
+
+            Assert.Null(_mockedMethods.lastCommandRunStatus);
+        }
+
+        [SkippableFact]
+        public void Inline_PluginSource_ExecutionStatus()
+        {
+            TestSetup(KeyMode.Cmd);
+            using var disp = SetPrediction(PredictionSource.Plugin, PredictionViewStyle.InlineView);
+
+            // The last accepted command line would be an empty string after this.
+            Test("", Keys(_.Enter));
+            _mockedMethods.ClearPredictionFields();
+
+            // We always pass in 'true' as the execution status of the last command line,
+            // and that feedback will be reported when
+            //  1. the plugin source is in use;
+            //  2. the last accepted command is not a whitespace string.
+            Test("yay", Keys(
+                // The plugin source is in use, but the last accepted command is an empty string.
+                CheckThat(() => Assert.Null(_mockedMethods.lastCommandRunStatus)),
+                "yay"));
+
+            Assert.Null(_mockedMethods.lastCommandRunStatus);
+
+            // The last accepted command line would be a whitespace string with 3 space characters after this.
+            Test("   ", Keys(
+                // The plugin source is in use, and the last accepted command is "yay".
+                CheckThat(() => Assert.True(_mockedMethods.lastCommandRunStatus)),
+                "   "));
+
+            Assert.True(_mockedMethods.lastCommandRunStatus);
+            _mockedMethods.ClearPredictionFields();
+
+            Test("abc", Keys(
+                // The plugin source is in use, but the last accepted command is a whitespace string.
+                CheckThat(() => Assert.Null(_mockedMethods.lastCommandRunStatus)),
+                "abc"));
+
+            Assert.Null(_mockedMethods.lastCommandRunStatus);
+        }
+
+        [SkippableFact]
+        public void Inline_HistoryAndPluginSource_ExecutionStatus()
+        {
+            TestSetup(KeyMode.Cmd);
+            using var disp = SetPrediction(PredictionSource.HistoryAndPlugin, PredictionViewStyle.InlineView);
+
+            // The last accepted command line would be an empty string after this.
+            Test("", Keys(_.Enter));
+            _mockedMethods.ClearPredictionFields();
+
+            // We always pass in 'true' as the execution status of the last command line,
+            // and that feedback will be reported when
+            //  1. the plugin source is in use;
+            //  2. the last accepted command is not a whitespace string.
+            Test("yay", Keys(
+                // The plugin source is in use, but the last accepted command is an empty string.
+                CheckThat(() => Assert.Null(_mockedMethods.lastCommandRunStatus)),
+                "yay"));
+
+            Assert.Null(_mockedMethods.lastCommandRunStatus);
+
+            // The last accepted command line would be a whitespace string with 3 space characters after this.
+            Test("   ", Keys(
+                // The plugin source is in use, and the last accepted command is "yay".
+                CheckThat(() => Assert.True(_mockedMethods.lastCommandRunStatus)),
+                "   "));
+
+            Assert.True(_mockedMethods.lastCommandRunStatus);
+            _mockedMethods.ClearPredictionFields();
+
+            Test("abc", Keys(
+                // The plugin source is in use, but the last accepted command is a whitespace string.
+                CheckThat(() => Assert.Null(_mockedMethods.lastCommandRunStatus)),
+                "abc"));
+
+            Assert.Null(_mockedMethods.lastCommandRunStatus);
+        }
+
+        [SkippableFact]
+        public void Inline_TruncateVeryLongSuggestion()
+        {
+            Skip.If(ScreenReaderModeEnabled, "Inline predictions are not supported in screen reader mode.");
+
+            TestSetup(new TestConsole(keyboardLayout: _, width: 10, height: 2), KeyMode.Cmd);
+            using var disp = SetPrediction(PredictionSource.History, PredictionViewStyle.InlineView);
+
+            // Truncate long suggestion to make sure the user input is not scrolled up-off the console buffer.
+            SetHistory(new string('v', 25));
+            Test("vv", Keys(
+                'v', CheckThat(() => AssertScreenIs(2,
+                        TokenClassification.Command, 'v',
+                        TokenClassification.InlinePrediction, new string('v', 9),
+                        TokenClassification.InlinePrediction, new string('v', 6) + "...")),
+                'v', CheckThat(() => AssertScreenIs(2,
+                        TokenClassification.Command, "vv",
+                        TokenClassification.InlinePrediction, new string('v', 8),
+                        TokenClassification.InlinePrediction, new string('v', 6) + "...")),
+                // Once accepted, the suggestion text should be blanked out.
+                _.Enter, CheckThat(() => AssertScreenIs(1,
+                        TokenClassification.Command, "vv"))
+            ));
         }
     }
 }

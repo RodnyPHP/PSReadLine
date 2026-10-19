@@ -86,7 +86,7 @@ namespace Microsoft.PowerShell
             _singleton._current = _singleton._buffer.Length;
 
             using var _ = _singleton._prediction.DisableScoped();
-            _singleton.ForceRender();
+            _singleton.Render(force: true);
 
             _singleton._console.Write("\x1b[91m^C\x1b[0m");
 
@@ -97,35 +97,77 @@ namespace Microsoft.PowerShell
         }
 
         /// <summary>
-        /// Like ForwardKillLine - deletes text from the point to the end of the line,
+        /// Like KillLine - deletes text from the point to the end of the input,
+        /// but does not put the deleted text in the kill ring.
+        /// </summary>
+        public static void ForwardDeleteInput(ConsoleKeyInfo? key = null, object arg = null)
+        {
+            ForwardDeleteImpl(_singleton._buffer.Length, ForwardDeleteInput);
+        }
+
+        /// <summary>
+        /// Deletes text from the point to the end of the current logical line,
         /// but does not put the deleted text in the kill ring.
         /// </summary>
         public static void ForwardDeleteLine(ConsoleKeyInfo? key = null, object arg = null)
         {
+            ForwardDeleteImpl(GetEndOfLogicalLinePos(_singleton._current) + 1, ForwardDeleteLine);
+        }
+
+        /// <summary>
+        /// Deletes text from the cursor position to the specified end position
+        /// but does not put the deleted text in the kill ring.
+        /// </summary>
+        /// <param name="endPosition">0-based offset to one character past the end of the text.</param>
+        private static void ForwardDeleteImpl(int endPosition, Action<ConsoleKeyInfo?, object> instigator)
+        {
             var current = _singleton._current;
             var buffer = _singleton._buffer;
-            if (buffer.Length > 0 && current < buffer.Length)
+
+            if (buffer.Length > 0 && current < endPosition)
             {
-                int length = buffer.Length - current;
+                int length = endPosition - current;
                 var str = buffer.ToString(current, length);
-                _singleton.SaveEditItem(EditItemDelete.Create(str, current));
+
+                _singleton.SaveEditItem(
+                    EditItemDelete.Create(
+                        str,
+                        current,
+                        instigator,
+                        instigatorArg: null,
+                        !InViEditMode()));
+
                 buffer.Remove(current, length);
                 _singleton.Render();
             }
         }
 
         /// <summary>
-        /// Like BackwardKillLine - deletes text from the point to the start of the line,
+        /// Like BackwardKillInput - deletes text from the point to the start of the input,
+        /// but does not put the deleted text in the kill ring.
+        public static void BackwardDeleteInput(ConsoleKeyInfo? key = null, object arg = null)
+        {
+            BackwardDeleteSubstring(0, BackwardDeleteInput);
+        }
+
+        /// <summary>
+        /// Like BackwardKillLine - deletes text from the point to the start of the logical line,
         /// but does not put the deleted text in the kill ring.
         /// </summary>
         public static void BackwardDeleteLine(ConsoleKeyInfo? key = null, object arg = null)
         {
-            if (_singleton._current > 0)
+            var position = GetBeginningOfLinePos(_singleton._current);
+            BackwardDeleteSubstring(position, BackwardDeleteLine);
+        }
+
+        private static void BackwardDeleteSubstring(int position, Action<ConsoleKeyInfo?, object> instigator)
+        {
+            if (_singleton._current > position)
             {
-                _clipboard.Record(_singleton._buffer, 0, _singleton._current);
-                _singleton.SaveEditItem(EditItemDelete.Create(_clipboard, 0));
-                _singleton._buffer.Remove(0, _singleton._current);
-                _singleton._current = 0;
+                var count = _singleton._current - position;
+
+                _singleton.RemoveTextToViRegister(position, count, instigator, arg: null, !InViEditMode());
+                _singleton._current = position;
                 _singleton.Render();
             }
         }
@@ -149,15 +191,8 @@ namespace Microsoft.PowerShell
                 qty = Math.Min(qty, _singleton._current);
 
                 int startDeleteIndex = _singleton._current - qty;
-                _singleton.SaveEditItem(
-                    EditItemDelete.Create(
-                        _singleton._buffer.ToString(startDeleteIndex, qty),
-                        startDeleteIndex,
-                        BackwardDeleteChar,
-                        arg)
-                        );
-                _singleton.SaveToClipboard(startDeleteIndex, qty);
-                _singleton._buffer.Remove(startDeleteIndex, qty);
+
+                _singleton.RemoveTextToViRegister(startDeleteIndex, qty, BackwardDeleteChar, arg, !InViEditMode());
                 _singleton._current = startDeleteIndex;
                 _singleton.Render();
             }
@@ -178,9 +213,7 @@ namespace Microsoft.PowerShell
                 {
                     qty = Math.Min(qty, _singleton._buffer.Length - _singleton._current);
 
-                    SaveEditItem(EditItemDelete.Create(_buffer.ToString(_current, qty), _current, DeleteChar, qty));
-                    SaveToClipboard(_current, qty);
-                    _buffer.Remove(_current, qty);
+                    RemoveTextToViRegister(_current, qty, DeleteChar, qty, !InViEditMode());
                     if (_current >= _buffer.Length)
                     {
                         _current = Math.Max(0, _buffer.Length + ViEndOfLineFactor);
@@ -213,6 +246,72 @@ namespace Microsoft.PowerShell
             _singleton.DeleteCharImpl(1, orExit: true);
         }
 
+        /// <summary>
+        /// A helper function to change the case of the current word.
+        /// </summary>
+        private static void UpdateWordCase(bool toUpper)
+        {
+            if (_singleton._current >= _singleton._buffer.Length)
+            {
+                Ding();
+                return;
+            }
+
+            int endOfWord = _singleton.FindForwardWordPoint(_singleton.Options.WordDelimiters);
+            int wordlen = endOfWord - _singleton._current;
+
+            string word = _singleton._buffer.ToString(_singleton._current, wordlen);
+            word = toUpper ? word.ToUpper() : word.ToLower();
+
+            Replace(_singleton._current, wordlen, word);
+
+            _singleton.MoveCursor(endOfWord);
+            _singleton.Render();
+        }
+
+        /// <summary>
+        /// Upcase the current word and move to the next one.
+        /// </summary>
+        public static void UpcaseWord(ConsoleKeyInfo? key = null, object arg = null)
+        {
+            UpdateWordCase(toUpper: true);
+        }
+
+        /// <summary>
+        /// Downcase the current word and move to the next one.
+        /// </summary>
+        public static void DowncaseWord(ConsoleKeyInfo? key = null, object arg = null)
+        {
+            UpdateWordCase(toUpper: false);
+        }
+
+        /// <summary>
+        /// Capitalize the current word and move to the next one.
+        /// </summary>
+        public static void CapitalizeWord(ConsoleKeyInfo? key = null, object arg = null)
+        {
+            if (_singleton._current >= _singleton._buffer.Length)
+            {
+                Ding();
+                return;
+            }
+
+            int endOfWord = _singleton.FindForwardWordPoint(_singleton.Options.WordDelimiters);
+            int wordlen = endOfWord - _singleton._current;
+
+            char[] word = _singleton._buffer.ToString(_singleton._current, wordlen).ToLower().ToCharArray();
+            int firstLetterIdx = Array.FindIndex(word, static x => char.IsLetter(x));
+
+            if (firstLetterIdx >= 0)
+            {
+                word[firstLetterIdx] = char.ToUpper(word[firstLetterIdx]);
+                Replace(_singleton._current, wordlen, new string(word));
+            }
+
+            _singleton.MoveCursor(endOfWord);
+            _singleton.Render();
+        }
+
         private bool AcceptLineImpl(bool validate)
         {
             using var _ = _prediction.DisableScoped();
@@ -234,13 +333,9 @@ namespace Microsoft.PowerShell
             _emphasisStart = -1;
             _emphasisLength = 0;
 
-            var insertionPoint = _current;
-            // Make sure cursor is at the end before writing the line
-            _current = _buffer.Length;
-
             if (renderNeeded)
             {
-                ForceRender();
+                Render(force: true);
             }
 
             // Only run validation if we haven't before.  If we have and status line shows an error,
@@ -248,6 +343,7 @@ namespace Microsoft.PowerShell
             // can report an error as it normally does.
             if (validate && !_statusIsErrorMessage)
             {
+                var insertionPoint = _current;
                 var errorMessage = Validate(_ast);
                 if (!string.IsNullOrWhiteSpace(errorMessage))
                 {
@@ -275,8 +371,13 @@ namespace Microsoft.PowerShell
                 ClearStatusMessage(render: true);
             }
 
-            // Let public API set cursor to end of line incase end of line is end of buffer
-            SetCursorPosition(_current);
+            // Make sure cursor is at the end before writing the line.
+            if (_current != _buffer.Length)
+            {
+                // Let public API set cursor to end of line incase end of line is end of buffer.
+                _current = _buffer.Length;
+                SetCursorPosition(_current);
+            }
 
             if (_prediction.ActiveView is PredictionListView listView)
             {
@@ -497,24 +598,16 @@ namespace Microsoft.PowerShell
         /// </summary>
         public static void InsertLineBelow(ConsoleKeyInfo? key = null, object arg = null)
         {
-            // Move the current position to the end of the current line and only the current line.
-            if (_singleton.LineIsMultiLine())
+            int i = _singleton._current;
+            for (; i < _singleton._buffer.Length; i++)
             {
-                int i = _singleton._current;
-                for (; i < _singleton._buffer.Length; i++)
+                if (_singleton._buffer[i] == '\n')
                 {
-                    if (_singleton._buffer[i] == '\n')
-                    {
-                        break;
-                    }
+                    break;
                 }
+            }
 
-                _singleton._current = i;
-            }
-            else
-            {
-                _singleton._current = _singleton._buffer.Length;
-            }
+            _singleton._current = i;
 
             Insert('\n');
         }

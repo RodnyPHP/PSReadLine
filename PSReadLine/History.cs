@@ -12,6 +12,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
+using System.Management.Automation.Language;
 using Microsoft.PowerShell.PSReadLine;
 
 namespace Microsoft.PowerShell
@@ -116,6 +117,21 @@ namespace Microsoft.PowerShell
             "password|asplaintext|token|apikey|secret",
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
+        private static readonly HashSet<string> s_SecretMgmtCommands = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "Get-Secret",
+            "Get-SecretInfo",
+            "Get-SecretVault",
+            "Register-SecretVault",
+            "Remove-Secret",
+            "Set-SecretInfo",
+            "Set-SecretVaultDefault",
+            "Test-SecretVault",
+            "Unlock-SecretVault",
+            "Unregister-SecretVault",
+            "Get-AzAccessToken",
+        };
+
         private void ClearSavedCurrentLine()
         {
             _savedCurrentLine.CommandLine = null;
@@ -124,7 +140,7 @@ namespace Microsoft.PowerShell
             _savedCurrentLine._editGroupStart = -1;
         }
 
-        private AddToHistoryOption GetAddToHistoryOption(string line)
+        private AddToHistoryOption GetAddToHistoryOption(string line, bool fromHistoryFile)
         {
             // Whitespace only is useless, never add.
             if (string.IsNullOrWhiteSpace(line))
@@ -139,7 +155,7 @@ namespace Microsoft.PowerShell
                 return AddToHistoryOption.SkipAdding;
             }
 
-            if (Options.AddToHistoryHandler != null)
+            if (!fromHistoryFile && Options.AddToHistoryHandler != null)
             {
                 if (Options.AddToHistoryHandler == PSConsoleReadLineOptions.DefaultAddToHistoryHandler)
                 {
@@ -188,10 +204,11 @@ namespace Microsoft.PowerShell
             bool fromDifferentSession = false,
             bool fromInitialRead = false)
         {
-            var addToHistoryOption = GetAddToHistoryOption(result);
+            bool fromHistoryFile = fromDifferentSession || fromInitialRead;
+            var addToHistoryOption = GetAddToHistoryOption(result, fromHistoryFile);
+
             if (addToHistoryOption != AddToHistoryOption.SkipAdding)
             {
-                var fromHistoryFile = fromDifferentSession || fromInitialRead;
                 _previousHistoryItem = new HistoryItem
                 {
                     CommandLine = result,
@@ -313,15 +330,24 @@ namespace Microsoft.PowerShell
                             _historyFileMutex.ReleaseMutex();
                         }
                     }
+
+                    // Consider it a failure if we timed out on the mutex.
+                    return false;
                 }
                 catch (AbandonedMutexException)
                 {
                     retryCount += 1;
+
+                    // We acquired the mutex object that was abandoned by another powershell process.
+                    // Now, since we own it, we must release it before retry, otherwise, we will miss
+                    // a release and keep holding the mutex, in which case the 'WaitOne' calls from
+                    // all other powershell processes will time out.
+                    _historyFileMutex.ReleaseMutex();
                 }
             } while (retryCount > 0 && retryCount < 3);
 
-            // No errors to report, so consider it a success even if we timed out on the mutex.
-            return true;
+            // If we reach here, that means we've done the retries but always got the 'AbandonedMutexException'.
+            return false;
         }
 
         private void WriteHistoryRange(int start, int end, bool overwritten)
@@ -427,18 +453,65 @@ namespace Microsoft.PowerShell
 
         private void ReadHistoryFile()
         {
-            WithHistoryFileMutexDo(1000, () =>
+            if (File.Exists(Options.HistorySavePath))
             {
-                if (!File.Exists(Options.HistorySavePath))
+                WithHistoryFileMutexDo(1000, () =>
                 {
-                    return;
+                    var historyLines = ReadHistoryLinesImpl(Options.HistorySavePath, Options.MaximumHistoryCount);
+                    UpdateHistoryFromFile(historyLines, fromDifferentSession: false, fromInitialRead: true);
+                    var fileInfo = new FileInfo(Options.HistorySavePath);
+                    _historyFileLastSavedSize = fileInfo.Length;
+                });
+            }
+
+            static IEnumerable<string> ReadHistoryLinesImpl(string path, int historyCount)
+            {
+                const long offset_1mb = 1048576;
+                const long offset_05mb = 524288;
+
+                // 1mb content contains more than 34,000 history lines for a typical usage, which should be
+                // more than enough to cover 20,000 history records (a history record could be a multi-line
+                // command). Similarly, 0.5mb content should be enough to cover 10,000 history records.
+                // We optimize the file reading when the history count falls in those ranges. If the history
+                // count is even larger, which should be very rare, we just read all lines.
+                long offset = historyCount switch
+                {
+                    <= 10000 => offset_05mb,
+                    <= 20000 => offset_1mb,
+                    _ => 0,
+                };
+
+                using var fs = new FileStream(path, FileMode.Open);
+                using var sr = new StreamReader(fs);
+
+                if (offset > 0 && fs.Length > offset)
+                {
+                    // When the file size is larger than the offset, we only read that amount of content from the end.
+                    fs.Seek(-offset, SeekOrigin.End);
+
+                    // After seeking, the current position may point at the middle of a history record, or even at a
+                    // byte within a UTF-8 character (history file is saved with UTF-8 encoding). So, let's ignore the
+                    // first line read from that position.
+                    sr.ReadLine();
+
+                    string line;
+                    while ((line = sr.ReadLine()) is not null)
+                    {
+                        if (!line.EndsWith("`", StringComparison.Ordinal))
+                        {
+                            // A complete history record is guaranteed to start from the next line.
+                            break;
+                        }
+                    }
                 }
 
-                var historyLines = File.ReadAllLines(Options.HistorySavePath);
-                UpdateHistoryFromFile(historyLines, fromDifferentSession: false, fromInitialRead: true);
-                var fileInfo = new FileInfo(Options.HistorySavePath);
-                _historyFileLastSavedSize = fileInfo.Length;
-            });
+                // Read lines in the streaming way, so it won't consume to much memory even if we have to
+                // read all lines from a large history file.
+                while (!sr.EndOfStream)
+                {
+                    yield return sr.ReadLine();
+                }
+            }
         }
 
         void UpdateHistoryFromFile(IEnumerable<string> historyLines, bool fromDifferentSession, bool fromInitialRead)
@@ -467,11 +540,260 @@ namespace Microsoft.PowerShell
             }
         }
 
+        private static bool IsOnLeftSideOfAnAssignment(Ast ast, out Ast rhs)
+        {
+            bool result = false;
+            rhs = null;
+
+            do
+            {
+                if (ast.Parent is AssignmentStatementAst assignment)
+                {
+                    rhs = assignment.Right;
+                    result = ReferenceEquals(assignment.Left, ast);
+
+                    break;
+                }
+
+                ast = ast.Parent;
+            }
+            while (ast.Parent is not null);
+
+            return result;
+        }
+
+        private static bool IsRightSideOfAnAssignmentSafe(Ast rhs)
+        {
+            if (rhs is PipelineAst)
+            {
+                // Right hand side is a pipeline.
+                return true;
+            }
+
+            if (rhs is CommandExpressionAst cmdExprAst && cmdExprAst.Expression is MemberExpressionAst or InvokeMemberExpressionAst)
+            {
+                // Right hand side is a member access, or method invocation.
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool IsSecretMgmtCommand(StringConstantExpressionAst strConst, out CommandAst command)
+        {
+            command = null;
+            bool result = false;
+
+            if (strConst.Parent is CommandAst cmdAst && ReferenceEquals(cmdAst.CommandElements[0], strConst) && s_SecretMgmtCommands.Contains(strConst.Value))
+            {
+                result = true;
+                command = cmdAst;
+            }
+
+            return result;
+        }
+
+        private static bool IsSafePropertyUsage(Ast member)
+        {
+            bool result = false;
+
+            if (member.Parent is MemberExpressionAst memberExpr)
+            {
+                // - If the property is NOT on the left side of an assignment, then it's safe.
+                // - Otherwise, if the right-hand side is a pipeline or a variable, then we consider it safe.
+                result = !IsOnLeftSideOfAnAssignment(memberExpr, out Ast rhs)
+                    || rhs is PipelineAst
+                    || (rhs is CommandExpressionAst cmdExpr && cmdExpr.Expression is VariableExpressionAst);
+            }
+
+            return result;
+        }
+
+        private static ExpressionAst GetArgumentForParameter(CommandParameterAst param)
+        {
+            if (param.Argument is not null)
+            {
+                return param.Argument;
+            }
+
+            var command = (CommandAst)param.Parent;
+            int index = 1;
+            for (; index < command.CommandElements.Count; index++)
+            {
+                if (ReferenceEquals(command.CommandElements[index], param))
+                {
+                    break;
+                }
+            }
+
+            int argIndex = index + 1;
+            if (argIndex < command.CommandElements.Count
+                && command.CommandElements[argIndex] is ExpressionAst arg)
+            {
+                return arg;
+            }
+
+            return null;
+        }
+
+        private static bool IsCloudTokenOrSecretAccess(StringConstantExpressionAst arg2Ast, out CommandAst command)
+        {
+            bool result = false;
+            command = arg2Ast.Parent as CommandAst;
+
+            if (command is not null && command.CommandElements.Count >= 3
+                && command.CommandElements[0] is StringConstantExpressionAst nameAst
+                && command.CommandElements[1] is StringConstantExpressionAst arg1Ast
+                && command.CommandElements[2] == arg2Ast)
+            {
+                string name = nameAst.Value;
+                string arg1 = arg1Ast.Value;
+                string arg2 = arg2Ast.Value;
+
+                if (string.Equals(name, "gcloud", StringComparison.OrdinalIgnoreCase))
+                {
+                    result = string.Equals(arg1, "auth", StringComparison.OrdinalIgnoreCase) &&
+                        string.Equals(arg2, "print-access-token", StringComparison.OrdinalIgnoreCase);
+                }
+                else if (string.Equals(name, "az", StringComparison.OrdinalIgnoreCase))
+                {
+                    result = string.Equals(arg1, "account", StringComparison.OrdinalIgnoreCase) &&
+                        string.Equals(arg2, "get-access-token", StringComparison.OrdinalIgnoreCase);
+                }
+                else if (string.Equals(name, "kubectl", StringComparison.OrdinalIgnoreCase))
+                {
+                    result = (string.Equals(arg1, "get", StringComparison.OrdinalIgnoreCase) || string.Equals(arg1, "describe", StringComparison.OrdinalIgnoreCase))
+                        && (string.Equals(arg2, "secrets", StringComparison.OrdinalIgnoreCase) || string.Equals(arg2, "secret", StringComparison.OrdinalIgnoreCase));
+                }
+            }
+
+            if (!result)
+            {
+                command = null;
+            }
+
+            return result;
+        }
+
         public static AddToHistoryOption GetDefaultAddToHistoryOption(string line)
         {
-            return s_sensitivePattern.IsMatch(line)
-                ? AddToHistoryOption.MemoryOnly
-                : AddToHistoryOption.MemoryAndFile;
+            if (string.IsNullOrEmpty(line))
+            {
+                return AddToHistoryOption.SkipAdding;
+            }
+
+            Match match = s_sensitivePattern.Match(line);
+            if (ReferenceEquals(match, Match.Empty))
+            {
+                return AddToHistoryOption.MemoryAndFile;
+            }
+
+            // The input contains at least one match of some sensitive patterns, so now we need to further
+            // analyze the input using the ASTs to see if it should actually be considered sensitive.
+            bool isSensitive = false;
+            ParseError[] parseErrors = _singleton._parseErrors;
+
+            // We need to compare the text here, instead of simply checking whether or not '_ast' is null.
+            // This is because we may need to update from history file in the middle of editing an input,
+            // and in that case, the '_ast' may be not-null, but it was not parsed from 'line'.
+            Ast ast = string.Equals(_singleton._ast?.Extent.Text, line)
+                ? _singleton._ast
+                : Parser.ParseInput(line, out _, out parseErrors);
+
+            if (parseErrors != null && parseErrors.Length > 0)
+            {
+                // If the input has any parsing errors, we cannot reliably analyze the AST. We just consider
+                // it sensitive in this case, given that it contains matches of our sensitive pattern.
+                return AddToHistoryOption.MemoryOnly;
+            }
+
+            do
+            {
+                int start = match.Index;
+                int end = start + match.Length;
+
+                IEnumerable<Ast> asts = ast.FindAll(
+                    ast => ast.Extent.StartOffset <= start && ast.Extent.EndOffset >= end,
+                    searchNestedScriptBlocks: true);
+
+                Ast innerAst = asts.Last();
+                switch (innerAst)
+                {
+                    case VariableExpressionAst:
+                        // It's a variable with sensitive name. Using the variable is fine, but assigning to
+                        // the variable could potentially expose sensitive content.
+                        // If it appears on the left-hand-side of an assignment, and the right-hand-side is
+                        // not a command invocation, we consider it sensitive.
+                        // e.g. `$token = Get-Secret` vs. `$token = 'token-text'` or `$token, $url = ...`
+                        isSensitive = IsOnLeftSideOfAnAssignment(innerAst, out Ast rhs) && !IsRightSideOfAnAssignmentSafe(rhs);
+
+                        if (!isSensitive)
+                        {
+                            match = match.NextMatch();
+                        }
+                        break;
+
+                    case StringConstantExpressionAst strConst:
+                        isSensitive = true;
+                        if (IsSecretMgmtCommand(strConst, out CommandAst command)
+                            || IsCloudTokenOrSecretAccess(strConst, out command))
+                        {
+                            // If it's one of the secret management commands that we can ignore, we consider it safe.
+                            isSensitive = false;
+                            // And we can safely skip the whole command text in this case.
+                            match = s_sensitivePattern.Match(line, command.Extent.EndOffset);
+                        }
+                        else if (IsSafePropertyUsage(strConst))
+                        {
+                            isSensitive = false;
+                            match = match.NextMatch();
+                        }
+
+                        break;
+
+                    case CommandParameterAst param:
+                        // Special-case the '-AsPlainText' parameter.
+                        if (string.Equals(param.ParameterName, "AsPlainText"))
+                        {
+                            isSensitive = true;
+                            break;
+                        }
+
+                        ExpressionAst arg = GetArgumentForParameter(param);
+                        if (arg is null)
+                        {
+                            // If no argument is found following the parameter, then it could be a switching parameter
+                            // such as '-UseDefaultPassword' or '-SaveToken', which we assume will not expose sensitive information.
+                            match = match.NextMatch();
+                        }
+                        else if (arg is VariableExpressionAst)
+                        {
+                            // Argument is a variable. It's fine to use a variable for a senstive parameter.
+                            // e.g. `Invoke-WebRequest -Token $token`
+                            match = s_sensitivePattern.Match(line, arg.Extent.EndOffset);
+                        }
+                        else if (arg is ParenExpressionAst paren
+                            && paren.Pipeline is PipelineAst pipeline
+                            && pipeline.PipelineElements[0] is not CommandExpressionAst)
+                        {
+                            // Argument is a command invocation, such as `Invoke-WebRequest -Token (Get-Secret)`.
+                            match = match.NextMatch();
+                        }
+                        else
+                        {
+                            // We consider all other arguments sensitive.
+                            isSensitive = true;
+                        }
+                        break;
+
+                    default:
+                        isSensitive = true;
+                        break;
+                }
+            }
+            while (!isSensitive && !ReferenceEquals(match, Match.Empty));
+
+            return isSensitive ? AddToHistoryOption.MemoryOnly : AddToHistoryOption.MemoryAndFile;
         }
 
         /// <summary>
@@ -764,6 +1086,11 @@ namespace Microsoft.PowerShell
                 numericArg = -numericArg;
             }
 
+            if (UpdateListSelection(numericArg))
+            {
+                return;
+            }
+
             _singleton.SaveCurrentLine();
             _singleton.HistorySearch(numericArg);
         }
@@ -775,6 +1102,10 @@ namespace Microsoft.PowerShell
         public static void HistorySearchForward(ConsoleKeyInfo? key = null, object arg = null)
         {
             TryGetArgAsInt(arg, out var numericArg, +1);
+            if (UpdateListSelection(numericArg))
+            {
+                return;
+            }
 
             _singleton.SaveCurrentLine();
             _singleton.HistorySearch(numericArg);

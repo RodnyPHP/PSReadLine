@@ -9,7 +9,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Management.Automation;
 using System.Management.Automation.Language;
 using System.Management.Automation.Runspaces;
-using System.Management.Automation.Subsystem;
+using System.Management.Automation.Subsystem.Prediction;
 using System.Text;
 using System.Threading.Tasks;
 using Microsoft.PowerShell.PSReadLine;
@@ -26,9 +26,13 @@ namespace Microsoft.PowerShell
             void Ding();
             CommandCompletion CompleteInput(string input, int cursorIndex, Hashtable options, System.Management.Automation.PowerShell powershell);
             bool RunspaceIsRemote(Runspace runspace);
-            Task<List<PredictionResult>> PredictInput(Ast ast, Token[] tokens);
+            Task<List<PredictionResult>> PredictInputAsync(Ast ast, Token[] tokens);
             void OnCommandLineAccepted(IReadOnlyList<string> history);
-            void OnSuggestionAccepted(Guid predictorId, string suggestionText);
+            void OnCommandLineExecuted(string commandLine, bool success);
+            void OnSuggestionDisplayed(Guid predictorId, uint session, int countOrIndex);
+            void OnSuggestionAccepted(Guid predictorId, uint session, string suggestionText);
+            void RenderFullHelp(string content, string regexPatternToScrollTo);
+            object GetDynamicHelpContent(string commandName, string parameterName, bool isFullHelp);
         }
 
         [SuppressMessage("Microsoft.MSInternal", "CA903:InternalNamespaceShouldNotContainPublicTypes")]
@@ -88,6 +92,7 @@ namespace Microsoft.PowerShell
         /// <param name="s">String to insert</param>
         public static void Insert(string s)
         {
+            s = s.Replace("\r\n", "\n");
             _singleton.SaveEditItem(EditItemInsertString.Create(s, _singleton._current));
 
             // Use Append if possible because Insert at end makes StringBuilder quite slow.

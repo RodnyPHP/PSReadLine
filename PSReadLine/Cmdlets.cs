@@ -15,6 +15,7 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading;
 using Microsoft.PowerShell.PSReadLine;
+using Microsoft.PowerShell.Internal;
 using AllowNull = System.Management.Automation.AllowNullAttribute;
 
 namespace Microsoft.PowerShell
@@ -95,16 +96,14 @@ namespace Microsoft.PowerShell
 
         // Find the most suitable color using https://stackoverflow.com/a/33206814
         // Default prediction color settings:
-        //  - use FG color 'dark black' for the inline-view suggestion text
         //  - use FG color 'yellow' for the list-view suggestion text
         //  - use BG color 'dark black' for the selected list-view suggestion text
-        public const string DefaultInlinePredictionColor       = "\x1b[38;5;238m";
         public const string DefaultListPredictionColor         = "\x1b[33m";
         public const string DefaultListPredictionSelectedColor = "\x1b[48;5;238m";
 
-        public static EditMode DefaultEditMode = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
-            ? EditMode.Windows
-            : EditMode.Emacs;
+        public static readonly string DefaultInlinePredictionColor;
+        public static readonly string DefaultListPredictionTooltipColor;
+        public static readonly EditMode DefaultEditMode;
 
         public const string DefaultContinuationPrompt = ">> ";
 
@@ -141,7 +140,7 @@ namespace Microsoft.PowerShell
         public const int DefaultCompletionQueryItems = 100;
 
         // Default includes all characters PowerShell treats like a dash - em dash, en dash, horizontal bar
-        public const string DefaultWordDelimiters = @";:,.[]{}()/\|^&*-=+'""" + "\u2013\u2014\u2015";
+        public const string DefaultWordDelimiters = @";:,.[]{}()/\|!?^&*-=+'""" + "\u2013\u2014\u2015";
 
         /// <summary>
         /// When ringing the bell, what should be done?
@@ -152,11 +151,6 @@ namespace Microsoft.PowerShell
 
         public const HistorySaveStyle DefaultHistorySaveStyle = HistorySaveStyle.SaveIncrementally;
 
-        /// <summary>
-        /// The predictive suggestion feature is disabled by default.
-        /// </summary>
-        public const PredictionSource DefaultPredictionSource = PredictionSource.None;
-
         public const PredictionViewStyle DefaultPredictionViewStyle = PredictionViewStyle.InlineView;
 
         /// <summary>
@@ -165,10 +159,45 @@ namespace Microsoft.PowerShell
         /// </summary>
         public const int DefaultAnsiEscapeTimeout = 100;
 
-        public PSConsoleReadLineOptions(string hostName)
+        static PSConsoleReadLineOptions()
+        {
+            // For inline-view suggestion text, we use the new FG color 'dim white italic' when possible, because it provides
+            // sufficient contrast in terminals that don't use a pure black background (like VSCode terminal).
+            // However, on Windows 10 and Windows Server, the ConHost doesn't support font effect VT sequences, such as 'dim'
+            // and 'italic', so we need to use the old FG color 'dark black' as in the v2.2.6.
+            const string newInlinePredictionColor = "\x1b[97;2;3m";
+            const string oldInlinePredictionColor = "\x1b[38;5;238m";
+
+            ColorSetters = null;
+            DefaultEditMode = EditMode.Emacs;
+            DefaultInlinePredictionColor = newInlinePredictionColor;
+
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                DefaultEditMode = EditMode.Windows;
+
+                // Our tests expect that the default inline-view color is set to the new color, so we configure
+                // the color based on system environment only if we are not in test runs.
+                if (AppDomain.CurrentDomain.FriendlyName is not "testhost")
+                {
+                    DefaultInlinePredictionColor =
+                        Environment.OSVersion.Version.Build >= 22621 // on Windows 11 22H2 or newer versions
+                        || Environment.GetEnvironmentVariable("WT_SESSION") is not null // in Windows Terminal
+                            ? newInlinePredictionColor
+                            : oldInlinePredictionColor;
+                }
+            }
+
+            // Use the same color for the list prediction tooltips.
+            DefaultListPredictionTooltipColor = DefaultInlinePredictionColor;
+            DefaultAddToHistoryHandler = s => PSConsoleReadLine.GetDefaultAddToHistoryOption(s);
+        }
+
+        public PSConsoleReadLineOptions(string hostName, bool usingLegacyConsole)
         {
             ResetColors();
             EditMode = DefaultEditMode;
+            ScreenReaderModeEnabled = Accessibility.IsScreenReaderActive();
             ContinuationPrompt = DefaultContinuationPrompt;
             ContinuationPromptColor = Console.ForegroundColor;
             ExtraPromptLineCount = DefaultExtraPromptLineCount;
@@ -185,7 +214,11 @@ namespace Microsoft.PowerShell
             HistorySearchCaseSensitive = DefaultHistorySearchCaseSensitive;
             HistorySaveStyle = DefaultHistorySaveStyle;
             AnsiEscapeTimeout = DefaultAnsiEscapeTimeout;
-            PredictionSource = DefaultPredictionSource;
+            PredictionSource = usingLegacyConsole
+                ? PredictionSource.None
+                : Environment.Version.Major < 6
+                    ? PredictionSource.History
+                    : PredictionSource.HistoryAndPlugin;
             PredictionViewStyle = DefaultPredictionViewStyle;
             MaximumHistoryCount = 0;
 
@@ -280,8 +313,7 @@ namespace Microsoft.PowerShell
         /// or added to memory only, or added to both memory and history file.
         /// </summary>
         public Func<string, object> AddToHistoryHandler { get; set; }
-        public static readonly Func<string, object> DefaultAddToHistoryHandler =
-            s => PSConsoleReadLine.GetDefaultAddToHistoryOption(s);
+        public static readonly Func<string, object> DefaultAddToHistoryHandler;
 
         /// <summary>
         /// This handler is called from ValidateAndAcceptLine.
@@ -300,7 +332,6 @@ namespace Microsoft.PowerShell
         /// odd things with script blocks, we create a white-list of commands
         /// that do invoke the script block - this covers the most useful cases.
         /// </summary>
-        [SuppressMessage("Microsoft.Usage", "CA2227:CollectionPropertiesShouldBeReadOnly")]
         public HashSet<string> CommandsToValidateScriptBlockArguments { get; set; }
 
         /// <summary>
@@ -491,6 +522,16 @@ namespace Microsoft.PowerShell
             set => _listPredictionSelectedColor = VTColorUtils.AsEscapeSequence(value);
         }
 
+        public object ListPredictionTooltipColor
+        {
+            get => _listPredictionTooltipColor;
+            set => _listPredictionTooltipColor = VTColorUtils.AsEscapeSequence(value);
+        }
+
+        public bool TerminateOrphanedConsoleApps { get; set; }
+
+        public bool ScreenReaderModeEnabled { get; set; }
+
         internal string _defaultTokenColor;
         internal string _commentColor;
         internal string _keywordColor;
@@ -508,6 +549,7 @@ namespace Microsoft.PowerShell
         internal string _inlinePredictionColor;
         internal string _listPredictionColor;
         internal string _listPredictionSelectedColor;
+        internal string _listPredictionTooltipColor;
 
         internal void ResetColors()
         {
@@ -522,12 +564,13 @@ namespace Microsoft.PowerShell
             ParameterColor    = DefaultParameterColor;
             TypeColor         = DefaultTypeColor;
             NumberColor       = DefaultNumberColor;
-            MemberColor       = DefaultNumberColor;
+            MemberColor       = DefaultMemberColor;
             EmphasisColor     = DefaultEmphasisColor;
             ErrorColor        = DefaultErrorColor;
             InlinePredictionColor       = DefaultInlinePredictionColor;
             ListPredictionColor         = DefaultListPredictionColor;
             ListPredictionSelectedColor = DefaultListPredictionSelectedColor;
+            ListPredictionTooltipColor  = DefaultListPredictionTooltipColor;
 
             var bg = Console.BackgroundColor;
             if (fg == VTColorUtils.UnknownColor || bg == VTColorUtils.UnknownColor)
@@ -540,7 +583,7 @@ namespace Microsoft.PowerShell
             SelectionColor = VTColorUtils.AsEscapeSequence(bg, fg);
         }
 
-        private static Dictionary<string, Action<PSConsoleReadLineOptions, object>> ColorSetters = null;
+        private static Dictionary<string, Action<PSConsoleReadLineOptions, object>> ColorSetters;
 
         internal void SetColor(string property, object value)
         {
@@ -567,6 +610,7 @@ namespace Microsoft.PowerShell
                         {"InlinePrediction", (o, v) => o.InlinePredictionColor = v},
                         {"ListPrediction", (o, v) => o.ListPredictionColor = v},
                         {"ListPredictionSelected", (o, v) => o.ListPredictionSelectedColor = v},
+                        {"ListPredictionTooltip", (o, v) => o.ListPredictionTooltipColor = v},
                     };
 
                 Interlocked.CompareExchange(ref ColorSetters, setters, null);
@@ -794,6 +838,22 @@ namespace Microsoft.PowerShell
         [Parameter]
         public Hashtable Colors { get; set; }
 
+        [Parameter]
+        public SwitchParameter TerminateOrphanedConsoleApps
+        {
+            get => _terminateOrphanedConsoleApps.GetValueOrDefault();
+            set => _terminateOrphanedConsoleApps = value;
+        }
+        internal SwitchParameter? _terminateOrphanedConsoleApps;
+
+        [Parameter]
+        public SwitchParameter EnableScreenReaderMode
+        {
+            get => _enableScreenReaderMode.GetValueOrDefault();
+            set => _enableScreenReaderMode = value;
+        }
+        internal SwitchParameter? _enableScreenReaderMode;
+
         [ExcludeFromCodeCoverage]
         protected override void EndProcessing()
         {
@@ -806,7 +866,6 @@ namespace Microsoft.PowerShell
         [Parameter(Position = 0, Mandatory = true)]
         [Alias("Key")]
         [ValidateNotNullOrEmpty]
-        [SuppressMessage("Microsoft.Performance", "CA1819:PropertiesShouldNotReturnArrays")]
         public string[] Chord { get; set; }
 
         [Parameter]
@@ -849,7 +908,7 @@ namespace Microsoft.PowerShell
         public string BriefDescription { get; set; }
 
         [Parameter(ParameterSetName = "ScriptBlock")]
-        [Alias("LongDescription")]  // Alias to stay comptible with previous releases
+        [Alias("LongDescription")]  // Alias to stay compatible with previous releases
         public string Description { get; set; }
 
         private const string FunctionParameter = "Function";
@@ -879,8 +938,7 @@ namespace Microsoft.PowerShell
             }
         }
 
-        private readonly Lazy<RuntimeDefinedParameterDictionary> _dynamicParameters =
-            new Lazy<RuntimeDefinedParameterDictionary>(CreateDynamicParametersResult);
+        private readonly Lazy<RuntimeDefinedParameterDictionary> _dynamicParameters = new(CreateDynamicParametersResult);
 
         private static RuntimeDefinedParameterDictionary CreateDynamicParametersResult()
         {
@@ -1003,7 +1061,7 @@ namespace Microsoft.PowerShell
 
         public const ConsoleColor UnknownColor = (ConsoleColor) (-1);
         private static readonly Dictionary<string, ConsoleColor> ConsoleColors =
-            new Dictionary<string, ConsoleColor>(StringComparer.OrdinalIgnoreCase)
+            new(StringComparer.OrdinalIgnoreCase)
             {
                 {"Black", ConsoleColor.Black},
                 {"DarkBlue", ConsoleColor.DarkBlue},

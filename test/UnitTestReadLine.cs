@@ -6,7 +6,7 @@ using System.Linq;
 using System.Management.Automation;
 using System.Management.Automation.Language;
 using System.Management.Automation.Runspaces;
-using System.Management.Automation.Subsystem;
+using System.Management.Automation.Subsystem.Prediction;
 using System.Threading.Tasks;
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -23,14 +23,19 @@ namespace Test
     {
         internal bool didDing;
         internal IReadOnlyList<string> commandHistory;
+        internal bool? lastCommandRunStatus;
         internal Guid acceptedPredictorId;
         internal string acceptedSuggestion;
+        internal string helpContentRendered;
+        internal Dictionary<Guid, Tuple<uint, int>> displayedSuggestions = new();
 
         internal void ClearPredictionFields()
         {
             commandHistory = null;
+            lastCommandRunStatus = null;
             acceptedPredictorId = Guid.Empty;
             acceptedSuggestion = null;
+            displayedSuggestions.Clear();
         }
 
         public void Ding()
@@ -48,7 +53,7 @@ namespace Test
             return false;
         }
 
-        public Task<List<PredictionResult>> PredictInput(Ast ast, Token[] tokens)
+        public Task<List<PredictionResult>> PredictInputAsync(Ast ast, Token[] tokens)
         {
             var result = ReadLine.MockedPredictInput(ast, tokens);
             var source = new TaskCompletionSource<List<PredictionResult>>();
@@ -62,10 +67,30 @@ namespace Test
             commandHistory = history;
         }
 
-        public void OnSuggestionAccepted(Guid predictorId, string suggestionText)
+        public void OnCommandLineExecuted(string commandLine, bool success)
+        {
+            lastCommandRunStatus = success;
+        }
+
+        public void OnSuggestionDisplayed(Guid predictorId, uint session, int countOrIndex)
+        {
+            displayedSuggestions[predictorId] = Tuple.Create(session, countOrIndex);
+        }
+
+        public void OnSuggestionAccepted(Guid predictorId, uint session, string suggestionText)
         {
             acceptedPredictorId = predictorId;
             acceptedSuggestion = suggestionText;
+        }
+
+        public object GetDynamicHelpContent(string commandName, string parameterName, bool isFullHelp)
+        {
+            return ReadLine.GetDynamicHelpContent(commandName, parameterName, isFullHelp);
+        }
+
+        public void RenderFullHelp(string content, string regexPatternToScrollTo)
+        {
+            helpContentRendered = content;
         }
     }
 
@@ -105,6 +130,9 @@ namespace Test
         internal virtual bool KeyboardHasGreaterThan => true;
         internal virtual bool KeyboardHasCtrlRBracket => true;
         internal virtual bool KeyboardHasCtrlAt => true;
+        internal virtual bool ScreenReaderModeEnabled => false;
+
+        internal int ContinuationPromptLength => _continuationPromptLength;
 
         static ReadLine()
         {
@@ -241,9 +269,16 @@ namespace Test
             var fg = _console.ForegroundColor;
             var bg = _console.BackgroundColor;
 
+            bool isLastItemNextLineToken = false;
+
             foreach (var i in items)
             {
                 var item = i;
+                if (item is not NextLineToken)
+                {
+                    isLastItemNextLineToken = false;
+                }
+
                 if (item is char c1)
                 {
                     result.Add(new CHAR_INFO(c1, fg, bg));
@@ -259,16 +294,28 @@ namespace Test
                     fg = _console.ForegroundColor;
                     bg = _console.BackgroundColor;
 
-                    int lineLen = result.Count % _console.BufferWidth;
-                    if (lineLen == 0 && result.Count > 0)
-                    {
-                        // The existing content is right at the end of a physical line,
-                        // so there is no need to pad.
-                        continue;
-                    }
+                    bool localCopy = isLastItemNextLineToken;
+                    isLastItemNextLineToken = true;
 
-                    // Padding is needed. Fall through to the string case.
-                    item = new string(' ', _console.BufferWidth - lineLen);
+                    if (localCopy)
+                    {
+                        // So this is the 2nd (or 3rd, 4th, and etc.) 'NextLineToken' in a row,
+                        // and that means an empty line is requested.
+                        item = _emptyLine;
+                    }
+                    else
+                    {
+                        int lineLen = result.Count % _console.BufferWidth;
+                        if (lineLen == 0 && result.Count > 0)
+                        {
+                            // The existing content is right at the end of a physical line,
+                            // so there is no need to pad.
+                            continue;
+                        }
+
+                        // Padding is needed. Fall through to the string case.
+                        item = new string(' ', _console.BufferWidth - lineLen);
+                    }
                 }
                 if (item is string str)
                 {
@@ -385,7 +432,12 @@ namespace Test
 
         private void AssertScreenIs(int lines, params object[] items)
         {
-            var consoleBuffer = _console.ReadBufferLines(0, lines);
+            AssertScreenIs(top: 0, lines, items);
+        }
+
+        private void AssertScreenIs(int top, int lines, params object[] items)
+        {
+            var consoleBuffer = _console.ReadBufferLines(top, lines);
 
             var expectedBuffer = CreateCharInfoBuffer(lines, items);
             Assert.Equal(expectedBuffer.Length, consoleBuffer.Length);
@@ -395,8 +447,13 @@ namespace Test
                 // that shouldn't be and aren't ever set by any code in PSReadLine, so we'll
                 // ignore those bits and just check the stuff we do set.
                 Assert.Equal(expectedBuffer[i].UnicodeChar, consoleBuffer[i].UnicodeChar);
-                Assert.Equal(expectedBuffer[i].ForegroundColor, consoleBuffer[i].ForegroundColor);
-                Assert.Equal(expectedBuffer[i].BackgroundColor, consoleBuffer[i].BackgroundColor);
+                if (!ScreenReaderModeEnabled)
+                {
+                    // Changing colors is not supported in screen reader mode,
+                    // and this is the simplest way to disable checking that in all the tests.
+                    Assert.Equal(expectedBuffer[i].ForegroundColor, consoleBuffer[i].ForegroundColor);
+                    Assert.Equal(expectedBuffer[i].BackgroundColor, consoleBuffer[i].BackgroundColor);
+                }
             }
         }
 
@@ -456,7 +513,10 @@ namespace Test
 
             _console.Init(items);
 
-            var result = PSConsoleReadLine.ReadLine(null, null);
+            var result = PSConsoleReadLine.ReadLine(
+                runspace: null,
+                engineIntrinsics: null,
+                lastRunStatus: true);
 
             if (_console.validationFailure != null)
             {
@@ -482,27 +542,42 @@ namespace Test
             Test(expectedResult, items, resetCursor: true, prompt: null, mustDing: true);
         }
 
+        private string _emptyLine;
         private TestConsole _console;
         private MockedMethods _mockedMethods;
+        private bool _oneTimeInitCompleted;
+        private object _psrlInstance;
+        private FieldInfo _psrlConsole, _psrlMockableMethods;
+        private int _continuationPromptLength;
 
         private static string MakeCombinedColor(ConsoleColor fg, ConsoleColor bg)
             => VTColorUtils.AsEscapeSequence(fg) + VTColorUtils.AsEscapeSequence(bg, isBackground: true);
 
         private void TestSetup(KeyMode keyMode, params KeyHandler[] keyHandlers)
         {
+            TestSetup(console: null, keyMode, keyHandlers);
+        }
+
+        private void TestSetup(TestConsole console, KeyMode keyMode, params KeyHandler[] keyHandlers)
+        {
             Skip.If(WindowsConsoleFixtureHelper.GetKeyboardLayout() != this.Fixture.Lang,
                     $"Keyboard layout must be set to {this.Fixture.Lang}");
 
-            _console = new TestConsole(_);
+            _console = console ?? new TestConsole(_);
             _mockedMethods = new MockedMethods();
-            var instance = (PSConsoleReadLine)typeof(PSConsoleReadLine)
-                .GetField("_singleton", BindingFlags.Static | BindingFlags.NonPublic).GetValue(null);
-            typeof(PSConsoleReadLine)
-                .GetField("_mockableMethods", BindingFlags.Instance | BindingFlags.NonPublic)
-                .SetValue(instance, _mockedMethods);
-            typeof(PSConsoleReadLine)
-                .GetField("_console", BindingFlags.Instance | BindingFlags.NonPublic)
-                .SetValue(instance, _console);
+
+            if (_psrlInstance is null)
+            {
+                Type psrlType = typeof(PSConsoleReadLine);
+                _psrlInstance = psrlType.GetField("_singleton", BindingFlags.Static | BindingFlags.NonPublic).GetValue(null);
+                _psrlConsole = psrlType.GetField("_console", BindingFlags.Instance | BindingFlags.NonPublic);
+                _psrlMockableMethods = psrlType.GetField("_mockableMethods", BindingFlags.Instance | BindingFlags.NonPublic);
+            }
+
+            _psrlConsole.SetValue(_psrlInstance, _console);
+            _psrlMockableMethods.SetValue(_psrlInstance, _mockedMethods);
+
+            _emptyLine ??= new string(' ', _console.BufferWidth);
 
             PSConsoleReadLine.ClearHistory();
             PSConsoleReadLine.ClearKillRing();
@@ -516,6 +591,7 @@ namespace Test
                 ContinuationPrompt                = PSConsoleReadLineOptions.DefaultContinuationPrompt,
                 DingDuration                      = 1,  // Make tests virtually silent when they ding
                 DingTone                          = 37, // Make tests virtually silent when they ding
+                EnableScreenReaderMode            = ScreenReaderModeEnabled,
                 ExtraPromptLineCount              = PSConsoleReadLineOptions.DefaultExtraPromptLineCount,
                 HistoryNoDuplicates               = PSConsoleReadLineOptions.DefaultHistoryNoDuplicates,
                 HistorySaveStyle                  = HistorySaveStyle.SaveNothing,
@@ -566,6 +642,18 @@ namespace Test
             }
             var colorOptions = new SetPSReadLineOption {Colors = colors};
             PSConsoleReadLine.SetOptions(colorOptions);
+
+            // Cache the continuation prompt length for use in tests
+            _continuationPromptLength = ScreenReaderModeEnabled
+                ? 0
+                : PSConsoleReadLine.GetOptions().ContinuationPrompt.Length;
+
+            if (!_oneTimeInitCompleted)
+            {
+                typeof(PSConsoleReadLine).GetMethod("Initialize", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .Invoke(_psrlInstance, new object[] { /* Runspace */ null, /* EngineIntrinsics */ null, });
+                _oneTimeInitCompleted = true;
+            }
         }
     }
 
@@ -594,5 +682,15 @@ namespace Test
         // requires AltGr, so you can't tell the difference b/w `]` and `Ctrl+]`.
         internal override bool KeyboardHasCtrlRBracket => false;
         internal override bool KeyboardHasCtrlAt => false;
+    }
+    
+    public class ScreenReader : Test.ReadLine, IClassFixture<ConsoleFixture>
+    {
+        public ScreenReader(ConsoleFixture fixture, ITestOutputHelper output)
+            : base(fixture, output, "en-US", "windows")
+        {
+        }
+        
+        internal override bool ScreenReaderModeEnabled => true;
     }
 }

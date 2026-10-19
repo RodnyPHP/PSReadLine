@@ -160,20 +160,13 @@ namespace Microsoft.PowerShell
         /// </summary>
         public static void MoveToEndOfLine(ConsoleKeyInfo? key = null, object arg = null)
         {
-            if (_singleton.LineIsMultiLine())
+            var eol = GetEndOfLogicalLinePos(_singleton._current);
+            if (eol != _singleton._current)
             {
-                var eol = GetEndOfLogicalLinePos(_singleton._current);
-                if (eol != _singleton._current)
-                {
-                    _singleton.MoveCursor(eol);
-                }
-                _singleton._moveToEndOfLineCommandCount++;
-                _singleton._moveToLineDesiredColumn = int.MaxValue;
+                _singleton.MoveCursor(eol);
             }
-            else
-            {
-                _singleton.MoveCursor(Math.Max(0, _singleton._buffer.Length + ViEndOfLineFactor));
-            }
+            _singleton._moveToEndOfLineCommandCount++;
+            _singleton._moveToLineDesiredColumn = int.MaxValue;
         }
 
         /// <summary>
@@ -241,6 +234,11 @@ namespace Microsoft.PowerShell
 
         private int ViFindBrace(int i)
         {
+            if (_buffer.Length == 0)
+            {
+                return i;
+            }
+
             switch (_buffer[i])
             {
                 case '{':
@@ -256,7 +254,32 @@ namespace Microsoft.PowerShell
                 case ')':
                     return ViFindBackward(i, '(', withoutPassing: ')');
                 default:
-                    return i;
+                    ReadOnlySpan<char> parentheses = stackalloc char[] { '{', '}', '(', ')', '[', ']' };
+                    int nextParen = i;
+                    // find next of any kind of paren
+                    for (; nextParen < _buffer.Length; nextParen++)
+                        for (int idx = 0; idx < parentheses.Length; idx++)
+                            if (parentheses[idx] == _buffer[nextParen]) goto Outer;
+
+                    // if not found, nextParen could exceed the range
+                    if (nextParen >= _buffer.Length)
+                        return i;
+
+                Outer:
+                    int match = _buffer[nextParen] switch
+                    {
+                        // if next is opening, find forward
+                        '{' => ViFindForward(nextParen, '}', withoutPassing: '{'),
+                        '[' => ViFindForward(nextParen, ']', withoutPassing: '['),
+                        '(' => ViFindForward(nextParen, ')', withoutPassing: '('),
+                        // if next is closing, find backward
+                        '}' => ViFindBackward(nextParen, '{', withoutPassing: '}'),
+                        ']' => ViFindBackward(nextParen, '[', withoutPassing: ']'),
+                        ')' => ViFindBackward(nextParen, '(', withoutPassing: ')'),
+                        _ => nextParen
+                    };
+
+                    return match == nextParen ? i : match;
             }
         }
 

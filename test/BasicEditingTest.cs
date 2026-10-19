@@ -73,7 +73,7 @@ namespace Test
         }
 
         [SkippableFact]
-        public void ForwardDeleteLine()
+        public void ForwardDeleteInput()
         {
             ConsoleKeyInfo deleteToEnd;
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
@@ -98,7 +98,22 @@ namespace Test
         }
 
         [SkippableFact]
-        public void BackwardDeleteLine()
+        public void ForwardDeleteLine()
+        {
+            TestSetup(KeyMode.Emacs);
+
+            PSConsoleReadLine.SetKeyHandler(new[] { "Shift+Tab" }, PSConsoleReadLine.ForwardDeleteLine, "", "");
+
+            Test("\"H\nWorld\"", Keys(
+                _.DQuote, "Hello", _.Enter,
+                "World", _.DQuote,
+                _.Home, _.Home, _.RightArrow, _.RightArrow,
+                _.Shift_Tab // delete to the end of the current logical line
+                ));
+        }
+
+        [SkippableFact]
+        public void BackwardDeleteInput()
         {
             TestSetup(KeyMode.Cmd);
 
@@ -186,6 +201,67 @@ namespace Test
         }
 
         [SkippableFact]
+        public void UpcaseWord()
+        {
+            TestSetup(KeyMode.Emacs);
+            Test("FOO", Keys("foo", _.Alt_b, _.Alt_u));
+            Test("FOO bar", Keys("foo bar", _.Home, _.Alt_u));
+            Test("foo BAR", Keys("foo bar", _.Alt_b, _.Alt_u));
+            Test("FOO BAR", Keys("foo bar", _.Home, Enumerable.Repeat(_.Alt_u, 2)));
+        }
+
+        [SkippableFact]
+        public void DowncaseWord()
+        {
+            TestSetup(KeyMode.Emacs);
+            Test("foo", Keys("fOO", _.Alt_b, _.Alt_l));
+            Test("FOO bar", Keys("FOO BAR", _.Alt_b, _.Alt_l));
+            Test("foo BAR", Keys("FOO BAR", _.Home, _.Alt_l));
+            Test("foo bar", Keys("FOO BAR", _.Home, Enumerable.Repeat(_.Alt_l, 2)));
+        }
+
+        [SkippableFact]
+        public void CapitalizeWord()
+        {
+            TestSetup(KeyMode.Emacs);
+            Test("Foo", Keys("fOO", _.Alt_b, _.Alt_c));
+            Test("fOO Bar", Keys("fOO bAR", _.Alt_b, _.Alt_c));
+            Test("Foo BAR", Keys("fOO BAR", _.Home, _.Alt_c));
+            Test("Foo Bar", Keys("fOO BAR", _.Home, Enumerable.Repeat(_.Alt_c, 2)));
+            Test("Foo ^&*() Bar", Keys("Foo ^&*() bar", _.Home, Enumerable.Repeat(_.Alt_c, 2)));
+        }
+
+        [SkippableFact]
+        public void SelectAndDelete()
+        {
+            TestSetup(KeyMode.Cmd);
+
+            Test("abcde", Keys(
+                "abcde",
+                CheckThat(() => AssertCursorLeftIs(5)),
+                _.Shift_LeftArrow, _.Shift_LeftArrow, _.Shift_LeftArrow,
+                _.Backspace,
+                CheckThat(() => AssertLineIs("ab")),
+                CheckThat(() => AssertCursorLeftIs(2)),
+                _.Ctrl_z,
+                CheckThat(() => AssertLineIs("abcde")),
+                CheckThat(() => AssertCursorLeftIs(5))));
+
+            Test("abcde", Keys(
+                "abcde", _.Home,
+                CheckThat(() => AssertCursorLeftIs(0)),
+                _.RightArrow, _.RightArrow,
+                CheckThat(() => AssertCursorLeftIs(2)),
+                _.Shift_RightArrow, _.Shift_RightArrow,
+                _.Delete,
+                CheckThat(() => AssertLineIs("abe")),
+                CheckThat(() => AssertCursorLeftIs(2)),
+                _.Ctrl_z,
+                CheckThat(() => AssertLineIs("abcde")),
+                CheckThat(() => AssertCursorLeftIs(4))));
+        }
+
+        [SkippableFact]
         public void SwapCharacters()
         {
             TestSetup(KeyMode.Emacs);
@@ -197,7 +273,7 @@ namespace Test
             Test("abc", Keys(
                 "abc", CheckThat(() => AssertLineIs("abc")),
                 _.Ctrl_t, CheckThat(() => AssertLineIs("acb")),
-                _.Ctrl_Underbar
+                _.Ctrl_Underbar, CheckThat(() => AssertCursorLeftIs(3))
                 ));
 
             Test("abcd", Keys(
@@ -264,8 +340,6 @@ namespace Test
         {
             TestSetup(KeyMode.Cmd);
 
-            var continutationPromptLength = PSConsoleReadLineOptions.DefaultContinuationPrompt.Length;
-
             // Test case - start with single line, cursor at end
             Test("56\n1234", Keys("1234", _.Ctrl_Enter, CheckThat(() => AssertCursorLeftTopIs(0, 0)), "56"));
 
@@ -280,13 +354,13 @@ namespace Test
 
             // Test case - start with multi-line, cursor at end of second line (end of input)
             Test("1234\n9ABC\n5678", Keys("1234", _.Shift_Enter, "5678",
-                                          _.Ctrl_Enter, CheckThat(() => AssertCursorLeftTopIs(continutationPromptLength, 1)),
+                                          _.Ctrl_Enter, CheckThat(() => AssertCursorLeftTopIs(ContinuationPromptLength, 1)),
                                           "9ABC"));
 
             // Test case - start with multi-line, cursor at beginning of second line
             Test("1234\n9ABC\n5678", Keys("1234", _.Shift_Enter, "5678",
-                                          _.LeftArrow, _.Home, CheckThat(() => AssertCursorLeftTopIs(continutationPromptLength, 1)),
-                                          _.Ctrl_Enter, CheckThat(() => AssertCursorLeftTopIs(continutationPromptLength, 1)),
+                                          _.LeftArrow, _.Home, CheckThat(() => AssertCursorLeftTopIs(ContinuationPromptLength, 1)),
+                                          _.Ctrl_Enter, CheckThat(() => AssertCursorLeftTopIs(ContinuationPromptLength, 1)),
                                           "9ABC"));
 
             // Test case - start with multi-line, cursor at end of first line
@@ -304,15 +378,15 @@ namespace Test
 
             // Test case - insert multiple blank lines
             Test("1234\n9ABC\n\n5678", Keys("1234", _.Shift_Enter, "5678",
-                                          _.Ctrl_Enter, CheckThat(() => AssertCursorLeftTopIs(continutationPromptLength, 1)),
-                                          _.Ctrl_Enter, CheckThat(() => AssertCursorLeftTopIs(continutationPromptLength, 1)),
+                                          _.Ctrl_Enter, CheckThat(() => AssertCursorLeftTopIs(ContinuationPromptLength, 1)),
+                                          _.Ctrl_Enter, CheckThat(() => AssertCursorLeftTopIs(ContinuationPromptLength, 1)),
                                           "9ABC"));
 
             // Test case - create leading blank line, cursor to stay on same line
             Test("\n\n1234", Keys("1234",
                 _.Ctrl_Enter, CheckThat(() => AssertCursorLeftTopIs(0,0)),
-                _.DownArrow, CheckThat(() => AssertCursorLeftTopIs(continutationPromptLength, 1)),
-                _.Ctrl_Enter, CheckThat(() => AssertCursorLeftTopIs(continutationPromptLength, 1))));
+                _.DownArrow, CheckThat(() => AssertCursorLeftTopIs(ContinuationPromptLength, 1)),
+                _.Ctrl_Enter, CheckThat(() => AssertCursorLeftTopIs(ContinuationPromptLength, 1))));
         }
 
         [SkippableFact]
@@ -320,51 +394,49 @@ namespace Test
         {
             TestSetup(KeyMode.Cmd);
 
-            var continutationPromptLength = PSConsoleReadLineOptions.DefaultContinuationPrompt.Length;
-
             // Test case - start with single line, cursor at end
             Test("1234\n56", Keys("1234",
-                                  _.Ctrl_Shift_Enter, CheckThat(() => AssertCursorLeftTopIs(continutationPromptLength, 1)),
+                                  _.Ctrl_Shift_Enter, CheckThat(() => AssertCursorLeftTopIs(ContinuationPromptLength, 1)),
                                   "56"));
 
             // Test case - start with single line, cursor in home position
             Test("1234\n56", Keys("1234",
-                                  _.Home, _.Ctrl_Shift_Enter, CheckThat(() => AssertCursorLeftTopIs(continutationPromptLength, 1)),
+                                  _.Home, _.Ctrl_Shift_Enter, CheckThat(() => AssertCursorLeftTopIs(ContinuationPromptLength, 1)),
                                   "56"));
 
             // Test case - start with single line, cursor in middle
             Test("1234\n56", Keys("1234",
-                                  _.LeftArrow, _.LeftArrow, _.Ctrl_Shift_Enter, CheckThat(() => AssertCursorLeftTopIs(continutationPromptLength, 1)),
+                                  _.LeftArrow, _.LeftArrow, _.Ctrl_Shift_Enter, CheckThat(() => AssertCursorLeftTopIs(ContinuationPromptLength, 1)),
                                   "56"));
 
             // Test case - start with multi-line, cursor at end of second line (end of input)
             Test("1234\n5678\n9ABC", Keys("1234", _.Shift_Enter, "5678",
-                                          _.Ctrl_Shift_Enter, CheckThat(() => AssertCursorLeftTopIs(continutationPromptLength, 2)),
+                                          _.Ctrl_Shift_Enter, CheckThat(() => AssertCursorLeftTopIs(ContinuationPromptLength, 2)),
                                           "9ABC"));
 
             // Test case - start with multi-line, cursor at beginning of second line
             Test("1234\n5678\n9ABC", Keys("1234", _.Shift_Enter, "5678",
-                                          _.LeftArrow, _.Home, CheckThat(() => AssertCursorLeftTopIs(continutationPromptLength, 1)),
-                                          _.Ctrl_Shift_Enter, CheckThat(() => AssertCursorLeftTopIs(continutationPromptLength, 2)),
+                                          _.LeftArrow, _.Home, CheckThat(() => AssertCursorLeftTopIs(ContinuationPromptLength, 1)),
+                                          _.Ctrl_Shift_Enter, CheckThat(() => AssertCursorLeftTopIs(ContinuationPromptLength, 2)),
                                           "9ABC"));
 
             // Test case - start with multi-line, cursor at end of first line
             Test("1234\n9ABC\n5678", Keys("1234", _.Shift_Enter, "5678",
                                           _.UpArrow, _.LeftArrow, _.End, CheckThat(() => AssertCursorLeftTopIs(4, 0)),
-                                          _.Ctrl_Shift_Enter, CheckThat(() => AssertCursorLeftTopIs(continutationPromptLength, 1)),
+                                          _.Ctrl_Shift_Enter, CheckThat(() => AssertCursorLeftTopIs(ContinuationPromptLength, 1)),
                                           "9ABC"));
 
             // Test case - start with multi-line, cursor at beginning of first line - temporarily having to press Home twice to
             // work around bug in home handler.
             Test("1234\n9ABC\n5678", Keys("1234", _.Shift_Enter, "5678",
                                           _.UpArrow, _.LeftArrow, _.Home, _.Home, CheckThat(() => AssertCursorLeftTopIs(0, 0)),
-                                          _.Ctrl_Shift_Enter, CheckThat(() => AssertCursorLeftTopIs(continutationPromptLength, 1)),
+                                          _.Ctrl_Shift_Enter, CheckThat(() => AssertCursorLeftTopIs(ContinuationPromptLength, 1)),
                                           "9ABC"));
 
             // Test case - insert multiple blank lines
             Test("1234\n5678\n\n9ABC", Keys("1234", _.Shift_Enter, "5678",
-                                          _.Ctrl_Shift_Enter, CheckThat(() => AssertCursorLeftTopIs(continutationPromptLength, 2)),
-                                          _.Ctrl_Shift_Enter, CheckThat(() => AssertCursorLeftTopIs(continutationPromptLength, 3)),
+                                          _.Ctrl_Shift_Enter, CheckThat(() => AssertCursorLeftTopIs(ContinuationPromptLength, 2)),
+                                          _.Ctrl_Shift_Enter, CheckThat(() => AssertCursorLeftTopIs(ContinuationPromptLength, 3)),
                                           "9ABC"));
         }
 

@@ -115,7 +115,16 @@ namespace Microsoft.PowerShell.PSReadLine {
         }
         
         /// <summary>
-        ///   Looks up a localized string similar to Delete text from the cursor to the start of the line.
+        ///   Looks up a localized string similar to Delete text from the cursor to the start of the input.
+        /// </summary>
+        internal static string BackwardDeleteInputDescription {
+            get {
+                return ResourceManager.GetString("BackwardDeleteInputDescription", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Delete text from the cursor to the start of the current logical line.
         /// </summary>
         internal static string BackwardDeleteLineDescription {
             get {
@@ -134,6 +143,15 @@ namespace Microsoft.PowerShell.PSReadLine {
         
         /// <summary>
         ///   Looks up a localized string similar to Move the text from the cursor to the beginning of the line to the kill ring.
+        /// </summary>
+        internal static string BackwardKillInputDescription {
+            get {
+                return ResourceManager.GetString("BackwardKillInputDescription", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Move the text from the start of the current logical line to the cursor to the kill ring.
         /// </summary>
         internal static string BackwardKillLineDescription {
             get {
@@ -223,7 +241,7 @@ namespace Microsoft.PowerShell.PSReadLine {
         }
         
         /// <summary>
-        ///   Looks up a localized string similar to Read a character and move the cursor to the previous occurence of that character.
+        ///   Looks up a localized string similar to Read a character and move the cursor to the previous occurrence of that character.
         /// </summary>
         internal static string CharacterSearchBackwardDescription {
             get {
@@ -232,7 +250,7 @@ namespace Microsoft.PowerShell.PSReadLine {
         }
         
         /// <summary>
-        ///   Looks up a localized string similar to Read a character and move the cursor to the next occurence of that character.
+        ///   Looks up a localized string similar to Read a character and move the cursor to the next occurrence of that character.
         /// </summary>
         internal static string CharacterSearchDescription {
             get {
@@ -302,7 +320,18 @@ namespace Microsoft.PowerShell.PSReadLine {
                 return ResourceManager.GetString("CompletionGrouping", resourceCulture);
             }
         }
-        
+
+        /// <summary>
+        ///   Looks up a localized string similar to Prediction functions.
+        /// </summary>
+        internal static string PredictionGrouping
+        {
+            get
+            {
+                return ResourceManager.GetString("PredictionGrouping", resourceCulture);
+            }
+        }
+
         /// <summary>
         ///   Looks up a localized string similar to Copy selected region to the system clipboard.  If no region is selected, copy the whole line.
         /// </summary>
@@ -504,6 +533,15 @@ namespace Microsoft.PowerShell.PSReadLine {
         /// <summary>
         ///   Looks up a localized string similar to Delete text from the cursor to the end of the line.
         /// </summary>
+        internal static string ForwardDeleteInputDescription {
+            get {
+                return ResourceManager.GetString("ForwardDeleteInputDescription", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Delete text from the cursor to the end of the current logical line.
+        /// </summary>
         internal static string ForwardDeleteLineDescription {
             get {
                 return ResourceManager.GetString("ForwardDeleteLineDescription", resourceCulture);
@@ -667,7 +705,7 @@ namespace Microsoft.PowerShell.PSReadLine {
         }
 
         /// <summary>
-        ///   Looks up a localized string similar to The prediction plugin source is not supported in this version of PowerShell. The 7.1 or a higher version of PowerShell is required to use this source.
+        ///   Looks up a localized string similar to The prediction plugin source is not supported in this version of PowerShell. The 7.2 or a higher version of PowerShell is required to use this source.
         /// </summary>
         internal static string PredictionPluginNotSupported
         {
@@ -862,14 +900,14 @@ namespace Microsoft.PowerShell.PSReadLine {
         ///BufferHeight: {4}
 
         ///Last {5} Keys
-        ///```
+        ///
         ///{6}
-        ///```
+        ///
 
         ///### Exception
-        ///```
+        ///
         ///{7}
-        ///```
+        ///
         /// </summary>
         internal static string OopsAnErrorMessage2 {
             get {
@@ -1626,7 +1664,7 @@ namespace Microsoft.PowerShell.PSReadLine {
         }
         
         /// <summary>
-        ///   Looks up a localized string similar to Invokes the console compatible editor specified by $env:VISUAL or $env:$EDITOR on the current command line..
+        ///   Looks up a localized string similar to Invokes the console compatible editor specified by $env:VISUAL or $env:EDITOR on the current command line..
         /// </summary>
         internal static string ViEditVisuallyDescription {
             get {
@@ -2033,6 +2071,17 @@ namespace Microsoft.PowerShell.PSReadLine {
         }
 
         /// <summary>
+        ///   Looks up a localized string similar to "! terminal size too small to show the list view".
+        /// </summary>
+        internal static string WindowSizeTooSmallWarning
+        {
+            get
+            {
+                return ResourceManager.GetString("WindowSizeTooSmallWarning", resourceCulture);
+            }
+        }
+
+        /// <summary>
         ///   Looks up a localized string similar to Copy the text from the current kill ring position to the input.
         /// </summary>
         internal static string YankDescription {
@@ -2065,6 +2114,158 @@ namespace Microsoft.PowerShell.PSReadLine {
         internal static string YankPopDescription {
             get {
                 return ResourceManager.GetString("YankPopDescription", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to No help content available. Please use Update-Help to download the latest help content.
+        /// </summary>
+        internal static string NeedsUpdateHelp {
+            get {
+                return ResourceManager.GetString("NeedsUpdateHelp", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Displaying help content is not supported on this console as it does not support alternate screen buffer.
+        /// </summary>
+        internal static string FullHelpNotSupportedInLegacyConsole
+        {
+            get
+            {
+                return ResourceManager.GetString("FullHelpNotSupportedInLegacyConsole", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Shows help for the command at the cursor in an alternate screen buffer.
+        /// </summary>
+        internal static string ShowCommandHelpDescription
+        {
+            get
+            {
+                return ResourceManager.GetString("ShowCommandHelpDescription", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Shows help for the parameter at the cursor.
+        /// </summary>
+        internal static string ShowParameterHelpDescription
+        {
+            get
+            {
+                return ResourceManager.GetString("ShowParameterHelpDescription", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Select the next suggestion item shown in the list view.
+        /// </summary>
+        internal static string NextSuggestionDescription
+        {
+            get
+            {
+                return ResourceManager.GetString("NextSuggestionDescription", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Select the previous suggestion item shown in the list view.
+        /// </summary>
+        internal static string PreviousSuggestionDescription
+        {
+            get
+            {
+                return ResourceManager.GetString("PreviousSuggestionDescription", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Switch between the inline and list prediction views.
+        /// </summary>
+        internal static string SwitchPredictionViewDescription
+        {
+            get
+            {
+                return ResourceManager.GetString("SwitchPredictionViewDescription", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Show the full tooltip of the selected list-view item in the terminal's alternate screen buffer.
+        /// </summary>
+        internal static string ShowFullPredictionTooltipDescription
+        {
+            get
+            {
+                return ResourceManager.GetString("ShowFullPredictionTooltipDescription", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Make visual selection of the command arguments.
+        /// </summary>
+        internal static string SelectCommandArgumentDescription
+        {
+            get
+            {
+                return ResourceManager.GetString("SelectCommandArgumentDescription", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to: Cannot locate the offset in the rendered text that was pointed by the original cursor. Initial Coord: ({0}, {1}) Buffer: ({2}, {3}) Cursor: ({4}, {5}).
+        /// </summary>
+        internal static string FailedToConvertPointToRenderDataOffset
+        {
+            get
+            {
+                return ResourceManager.GetString("FailedToConvertPointToRenderDataOffset", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to: Find the next word starting from the current position and then upcase the first character and downcase the remaining characters.
+        /// </summary>
+        internal static string CapitalizeWordDescription
+        {
+            get
+            {
+                return ResourceManager.GetString("CapitalizeWordDescription", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to: Find the next word starting from the current position and then make it lower case.
+        /// </summary>
+        internal static string DowncaseWordDescription
+        {
+            get
+            {
+                return ResourceManager.GetString("DowncaseWordDescription", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to: Find the next word starting from the current position and then make it upper case.
+        /// </summary>
+        internal static string UpcaseWordDescription
+        {
+            get
+            {
+                return ResourceManager.GetString("UpcaseWordDescription", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to: The '{0}' option is not supported on non-Windows platforms.
+        /// </summary>
+        internal static string OptionNotSupportedOnNonWindows
+        {
+            get
+            {
+                return ResourceManager.GetString("OptionNotSupportedOnNonWindows", resourceCulture);
             }
         }
     }

@@ -21,23 +21,16 @@ namespace Microsoft.PowerShell
         /// </summary>
         public static void EndOfLine(ConsoleKeyInfo? key = null, object arg = null)
         {
-            if (_singleton.LineIsMultiLine())
+            int i = _singleton._current;
+            for (; i < _singleton._buffer.Length; i++)
             {
-                int i = _singleton._current;
-                for (; i < _singleton._buffer.Length; i++)
+                if (_singleton._buffer[i] == '\n')
                 {
-                    if (_singleton._buffer[i] == '\n')
-                    {
-                        break;
-                    }
+                    break;
                 }
+            }
 
-                _singleton.MoveCursor((i == _singleton._current) ? _singleton._buffer.Length : i);
-            }
-            else
-            {
-                _singleton.MoveCursor(_singleton._buffer.Length);
-            }
+            _singleton.MoveCursor((i == _singleton._current) ? _singleton._buffer.Length : i);
         }
 
         /// <summary>
@@ -97,7 +90,7 @@ namespace Microsoft.PowerShell
                 }
                 else
                 {
-                    ViOffsetCursorPosition(+ numericArg);
+                    ViOffsetCursorPosition(+numericArg);
                 }
             }
         }
@@ -109,7 +102,7 @@ namespace Microsoft.PowerShell
         {
             if (TryGetArgAsInt(arg, out var numericArg, 1))
             {
-                ViOffsetCursorPosition(- numericArg);
+                ViOffsetCursorPosition(-numericArg);
             }
         }
 
@@ -225,7 +218,8 @@ namespace Microsoft.PowerShell
                 point = point ?? ConvertOffsetToPoint(_current);
                 int newY = point.Value.Y + lineOffset;
 
-                Point newPoint = new Point() {
+                Point newPoint = new Point()
+                {
                     X = _moveToLineDesiredColumn,
                     Y = Math.Max(newY, _initialY)
                 };
@@ -470,18 +464,18 @@ namespace Microsoft.PowerShell
             int direction;
             switch (token.Kind)
             {
-            case TokenKind.LParen:   toMatch = TokenKind.RParen; direction = 1; break;
-            case TokenKind.LCurly:   toMatch = TokenKind.RCurly; direction = 1; break;
-            case TokenKind.LBracket: toMatch = TokenKind.RBracket; direction = 1; break;
+                case TokenKind.LParen: toMatch = TokenKind.RParen; direction = 1; break;
+                case TokenKind.LCurly: toMatch = TokenKind.RCurly; direction = 1; break;
+                case TokenKind.LBracket: toMatch = TokenKind.RBracket; direction = 1; break;
 
-            case TokenKind.RParen:   toMatch = TokenKind.LParen; direction = -1; break;
-            case TokenKind.RCurly:   toMatch = TokenKind.LCurly; direction = -1; break;
-            case TokenKind.RBracket: toMatch = TokenKind.LBracket; direction = -1; break;
+                case TokenKind.RParen: toMatch = TokenKind.LParen; direction = -1; break;
+                case TokenKind.RCurly: toMatch = TokenKind.LCurly; direction = -1; break;
+                case TokenKind.RBracket: toMatch = TokenKind.LBracket; direction = -1; break;
 
-            default:
-                // Nothing to match (don't match inside strings/comments)
-                Ding();
-                return;
+                default:
+                    // Nothing to match (don't match inside strings/comments)
+                    Ding();
+                    return;
             }
 
             var matchCount = 0;
@@ -533,16 +527,16 @@ namespace Microsoft.PowerShell
         }
 
         /// <summary>
-        /// Read a character and search forward for the next occurence of that character.
+        /// Read a character and search forward for the next occurrence of that character.
         /// If an argument is specified, search forward (or backward if negative) for the
-        /// nth occurence.
+        /// nth occurrence.
         /// </summary>
         public static void CharacterSearch(ConsoleKeyInfo? key = null, object arg = null)
         {
-            int occurence = arg as int? ?? 1;
-            if (occurence < 0)
+            int occurrence = arg as int? ?? 1;
+            if (occurrence < 0)
             {
-                CharacterSearchBackward(key, -occurence);
+                CharacterSearchBackward(key, -occurrence);
                 return;
             }
 
@@ -556,31 +550,31 @@ namespace Microsoft.PowerShell
             {
                 if (_singleton._buffer[i] == toFind)
                 {
-                    occurence -= 1;
-                    if (occurence == 0)
+                    occurrence -= 1;
+                    if (occurrence == 0)
                     {
                         _singleton.MoveCursor(i);
                         break;
                     }
                 }
             }
-            if (occurence > 0)
+            if (occurrence > 0)
             {
                 Ding();
             }
         }
 
         /// <summary>
-        /// Read a character and search backward for the next occurence of that character.
+        /// Read a character and search backward for the next occurrence of that character.
         /// If an argument is specified, search backward (or forward if negative) for the
-        /// nth occurence.
+        /// nth occurrence.
         /// </summary>
         public static void CharacterSearchBackward(ConsoleKeyInfo? key = null, object arg = null)
         {
-            int occurence = arg as int? ?? 1;
-            if (occurence < 0)
+            int occurrence = arg as int? ?? 1;
+            if (occurrence < 0)
             {
-                CharacterSearch(key, -occurence);
+                CharacterSearch(key, -occurrence);
                 return;
             }
 
@@ -594,8 +588,8 @@ namespace Microsoft.PowerShell
             {
                 if (_singleton._buffer[i] == toFind)
                 {
-                    occurence -= 1;
-                    if (occurence == 0)
+                    occurrence -= 1;
+                    if (occurrence == 0)
                     {
                         _singleton.MoveCursor(i);
                         return;

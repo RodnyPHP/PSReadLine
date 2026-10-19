@@ -129,11 +129,17 @@
   <data name="BackwardDeleteCharDescription" xml:space="preserve">
     <value>Delete the character before the cursor</value>
   </data>
+  <data name="BackwardDeleteInputDescription" xml:space="preserve">
+    <value>Delete text from the cursor to the start of the input</value>
+  </data>
   <data name="BackwardDeleteLineDescription" xml:space="preserve">
-    <value>Delete text from the cursor to the start of the line</value>
+    <value>Delete text from the cursor to the start of the current logical line</value>
+  </data>
+  <data name="BackwardKillInputDescription" xml:space="preserve">
+    <value>Move the text from the cursor to the beginning of the input to the kill ring</value>
   </data>
   <data name="BackwardKillLineDescription" xml:space="preserve">
-    <value>Move the text from the cursor to the beginning of the line to the kill ring</value>
+    <value>Move the text from the start of the current logical line to the cursor to the kill ring</value>
   </data>
   <data name="BeginningOfHistoryDescription" xml:space="preserve">
     <value>Move to the first item in the history</value>
@@ -180,8 +186,11 @@
   <data name="ForwardCharDescription" xml:space="preserve">
     <value>Move the cursor forward one character</value>
   </data>
+  <data name="ForwardDeleteInputDescription" xml:space="preserve">
+    <value>Delete text from the cursor to the end of the input</value>
+  </data>
   <data name="ForwardDeleteLineDescription" xml:space="preserve">
-    <value>Delete text from the cursor to the end of the line</value>
+    <value>Delete text from the cursor to the end of the current logical line</value>
   </data>
   <data name="ShellForwardWordDescription" xml:space="preserve">
     <value>Move the cursor to the beginning of the next token or end of line</value>
@@ -283,10 +292,10 @@
     <value>Move the text from the cursor to the start of the current or previous whitespace delimited word to the kill ring</value>
   </data>
   <data name="CharacterSearchBackwardDescription" xml:space="preserve">
-    <value>Read a character and move the cursor to the previous occurence of that character</value>
+    <value>Read a character and move the cursor to the previous occurrence of that character</value>
   </data>
   <data name="CharacterSearchDescription" xml:space="preserve">
-    <value>Read a character and move the cursor to the next occurence of that character</value>
+    <value>Read a character and move the cursor to the next occurrence of that character</value>
   </data>
   <data name="DigitArgumentDescription" xml:space="preserve">
     <value>Start or accumulate a numeric argument to other functions</value>
@@ -391,7 +400,7 @@
     <value>
 Oops, something went wrong.
 Please report this bug with ALL the details below, including both the 'Environment' and 'Exception' sections.
-Please report on GitHub: https://github.com/PowerShell/PSReadLine/issues/new?template=Bug_Report.md
+Please report on GitHub: https://github.com/PowerShell/PSReadLine/issues/new?template=Bug_Report.yaml
 Thank you!
 </value>
   </data>
@@ -403,15 +412,14 @@ OS: {2}
 BufferWidth: {3}
 BufferHeight: {4}
 
-Last {5} Keys
-```
+Last {5} Keys:
+
 {6}
-```
 
 ### Exception
-```
+
 {7}
-```
+
 </value>
   </data>
   <data name="NextLineDescription" xml:space="preserve">
@@ -704,7 +712,7 @@ If there are other parse errors, unresolved commands, or incorrect parameters, s
     <value>Invokes TabCompletePrevious after doing some vi-specific clean up.</value>
   </data>
   <data name="ViEditVisuallyDescription" xml:space="preserve">
-    <value>Invokes the console compatible editor specified by $env:VISUAL or $env:$EDITOR on the current command line.</value>
+    <value>Invokes the console compatible editor specified by $env:VISUAL or $env:EDITOR on the current command line.</value>
   </data>
   <data name="ViAppendLineDescription" xml:space="preserve">
     <value>Appends a new multi-line edit mode line to the current line.</value>
@@ -781,6 +789,9 @@ Or not saving history with:
   <data name="CompletionGrouping" xml:space="preserve">
     <value>Completion functions</value>
   </data>
+  <data name="PredictionGrouping" xml:space="preserve">
+    <value>Prediction functions</value>
+  </data>
   <data name="MiscellaneousGrouping" xml:space="preserve">
     <value>Miscellaneous functions</value>
   </data>
@@ -803,7 +814,7 @@ Or not saving history with:
     <value>The predictive suggestion feature cannot be enabled because the console output doesn't support virtual terminal processing or it's redirected.</value>
   </data>
   <data name="PredictionPluginNotSupported" xml:space="preserve">
-    <value>The prediction plugin source is not supported in this version of PowerShell. The 7.1 or a higher version of PowerShell is required to use this source.</value>
+    <value>The prediction plugin source is not supported in this version of PowerShell. The 7.2 or a higher version of PowerShell is required to use this source.</value>
   </data>
   <data name="DeleteEndOfBufferDescription" xml:space="preserve">
     <value>Delete the current logical line and up to the end of the multiline buffer</value>
@@ -824,9 +835,45 @@ Or not saving history with:
     <value>Select the previous suggestion item shown in the list view.</value>
   </data>
   <data name="SwitchPredictionViewDescription" xml:space="preserve">
-    <value>Switch to the other prediction view.</value>
+    <value>Switch between the inline and list prediction views.</value>
+  </data>
+  <data name="ShowFullPredictionTooltipDescription" xml:space="preserve">
+    <value>Show the full tooltip of the selected list-view item in the terminal's alternate screen buffer.</value>
   </data>
   <data name="WindowSizeTooSmallForListView" xml:space="preserve">
     <value>The prediction 'ListView' is temporarily disabled because the current window size of the console is too small. To use the 'ListView', please make sure the 'WindowWidth' is not less than '{0}' and the 'WindowHeight' is not less than '{1}'.</value>
+  </data>
+  <data name="WindowSizeTooSmallWarning" xml:space="preserve">
+    <value>! terminal size too small to show the list view</value>
+  </data>
+  <data name="NeedsUpdateHelp" xml:space="preserve">
+    <value>No help content available. Please use Update-Help to download the latest help content.</value>
+  </data>
+  <data name="FullHelpNotSupportedInLegacyConsole" xml:space="preserve">
+    <value>Displaying help content is not supported on this console as it does not support alternate screen buffer.</value>
+  </data>
+  <data name="ShowCommandHelpDescription" xml:space="preserve">
+    <value>Shows help for the command at the cursor in an alternate screen buffer.</value>
+  </data>
+  <data name="ShowParameterHelpDescription" xml:space="preserve">
+    <value>Shows help for the parameter at the cursor.</value>
+  </data>
+  <data name="SelectCommandArgumentDescription" xml:space="preserve">
+    <value>Make visual selection of the command arguments.</value>
+  </data>
+  <data name="FailedToConvertPointToRenderDataOffset" xml:space="preserve">
+    <value>Cannot locate the offset in the rendered text that was pointed by the original cursor. Initial Coord: ({0}, {1}) Buffer: ({2}, {3}) Cursor: ({4}, {5})</value>
+  </data>
+  <data name="CapitalizeWordDescription" xml:space="preserve">
+    <value>Find the next word starting from the current position and then upcase the first character and downcase the remaining characters.</value>
+  </data>
+  <data name="DowncaseWordDescription" xml:space="preserve">
+    <value>Find the next word starting from the current position and then make it lower case.</value>
+  </data>
+  <data name="UpcaseWordDescription" xml:space="preserve">
+    <value>Find the next word starting from the current position and then make it upper case.</value>
+  </data>
+  <data name="OptionNotSupportedOnNonWindows" xml:space="preserve">
+    <value>The '{0}' option is not supported on non-Windows platforms.</value>
   </data>
 </root>

@@ -1,8 +1,12 @@
 
-$MinimalSDKVersion = '5.0.100'
 $IsWindowsEnv = [System.Environment]::OSVersion.Platform -eq "Win32NT"
 $RepoRoot = (Resolve-Path "$PSScriptRoot/..").Path
 $LocalDotnetDirPath = if ($IsWindowsEnv) { "$env:LocalAppData\Microsoft\dotnet" } else { "$env:HOME/.dotnet" }
+
+# Read the required SDK version from global.json
+$globalJsonPath = Join-Path $RepoRoot "global.json"
+$globalJson = Get-Content -Path $globalJsonPath -Raw | ConvertFrom-Json
+$MinimalSDKVersion = $globalJson.sdk.version
 
 <#
 .SYNOPSIS
@@ -39,7 +43,7 @@ function Find-Dotnet
             $env:PATH = $LocalDotnetDirPath + [IO.Path]::PathSeparator + $env:PATH
         }
         else {
-            throw "Cannot find the dotnet SDK for .NET 5. Please specify '-Bootstrap' to install build dependencies."
+            throw "Cannot find the dotnet SDK with the version $MinimalSDKVersion or higher. Please specify '-Bootstrap' to install build dependencies."
         }
     }
 }
@@ -54,7 +58,7 @@ function Test-DotnetSDK
 
     if (Test-Path $dotnetExePath) {
         $installedVersion = & $dotnetExePath --version
-        return $installedVersion -ge $MinimalSDKVersion
+        return [Version]::new($installedVersion) -ge [Version]::new($MinimalSDKVersion)
     }
     return $false
 }
@@ -210,7 +214,16 @@ function Start-TestRun
 
     function RunXunitTestsInNewProcess ([string] $Layout, [string] $OperatingSystem)
     {
-        $filter = "FullyQualifiedName~Test.{0}_{1}" -f ($Layout -replace '-','_'), $OperatingSystem
+        $filter = if ($Layout) {
+            Write-Log "`nTesting $Layout on $OperatingSystem..."
+            "FullyQualifiedName~Test.{0}_{1}" -f ($Layout -replace '-','_'), $OperatingSystem
+        } else {
+            ## Today, tests for screen-reader mode only run on Windows with the 'en-US' layout.
+            $Layout = "screen-reader"
+            Write-Log "`nTesting $Layout mode..."
+            "FullyQualifiedName~Test.ScreenReader"
+        }
+
         $testResultFile = "xUnitTestResults.{0}.xml" -f $Layout
         $testResultFile = Join-Path $testResultFolder $testResultFile
 
@@ -263,7 +276,6 @@ function Start-TestRun
                     {
                         if (Test-Path "KeyInfo-${layout}-windows.json")
                         {
-                            Write-Log "Testing $layout ..."
                             $null = [KeyboardLayoutHelper]::SetKeyboardLayout($layout)
 
                             # We have to use Start-Process so it creates a new window, because the keyboard
@@ -273,7 +285,7 @@ function Start-TestRun
                         }
                         else
                         {
-                            Write-Log "Testing not supported for the keyboard layout '$layout'."
+                            Write-Log "`nTesting not supported for the keyboard layout '$layout'."
                         }
                     }
                 }
@@ -283,6 +295,8 @@ function Start-TestRun
                     $null = [KeyboardLayoutHelper]::SetKeyboardLayout($savedLayout)
                 }
             }
+
+            RunXunitTestsInNewProcess
         }
         else
         {
@@ -337,5 +351,28 @@ function Test-XUnitTestResults
         }
 
         throw "$($failedTests.failed) tests failed"
+    }
+}
+
+<#
+.SYNOPSIS
+    Run 'dotnet restore' for all the target runtime that we are interested in to
+    update packages on the CFS feed.
+    This needs to be run on a MS employee's dev machine whenever there is update
+    to the NuGet packages used in PSReadLine repo, so that the package and all its
+    dependencies can be pull into the CFS feed from upstream feed.
+#>
+function Update-CFSFeed
+{
+    $rids = @('win-x64', 'win-arm64', 'linux-x64', 'linux-arm', 'linux-arm64', 'osx-x64', 'osx-arm64')
+
+    Write-Host "1. clear all NuGet caches on the local machine." -ForegroundColor Green
+    dotnet nuget locals all -c
+
+    Write-Host "2. restore for target runtimes." -ForegroundColor Green
+    foreach ($rid in $rids) {
+        Write-Host "  - $rid" -ForegroundColor Green
+        dotnet restore -r $rid ../test/PSReadLine.Tests.csproj
+        dotnet restore -r $rid ../MockPSConsole/MockPSConsole.csproj
     }
 }

@@ -3,25 +3,24 @@
   <PropertyGroup>
     <OutputType>Library</OutputType>
     <RootNamespace>Microsoft.PowerShell.PSReadLine</RootNamespace>
-    <AssemblyName>Microsoft.PowerShell.PSReadLine2</AssemblyName>
+    <AssemblyName>Microsoft.PowerShell.PSReadLine</AssemblyName>
     <NoWarn>$(NoWarn);CA1416</NoWarn>
-    <AssemblyVersion>2.2.0.0</AssemblyVersion>
-    <FileVersion>2.2.0</FileVersion>
-    <InformationalVersion>2.2.0-beta1</InformationalVersion>
+    <AssemblyVersion>3.0.0.0</AssemblyVersion>
+    <FileVersion>3.0.0</FileVersion>
+    <InformationalVersion>3.0.0</InformationalVersion>
     <CheckForOverflowUnderflow>true</CheckForOverflowUnderflow>
-    <TargetFrameworks>net461;net5.0</TargetFrameworks>
+    <TargetFramework>net8.0</TargetFramework>
     <SuppressNETCoreSdkPreviewMessage>true</SuppressNETCoreSdkPreviewMessage>
-    <LangVersion>8.0</LangVersion>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <LangVersion>9.0</LangVersion>
   </PropertyGroup>
 
-  <ItemGroup Condition="'$(TargetFramework)' == 'net461'">
-    <PackageReference Include="PowerShellStandard.Library" version="5.1.0" />
-    <PackageReference Include="Microsoft.CSharp" version="4.5.0" />
-    <ProjectReference Include="..\Polyfill\Polyfill.csproj" />
-  </ItemGroup>
-
-  <ItemGroup Condition="'$(TargetFramework)' == 'net5.0'">
-    <PackageReference Include="System.Management.Automation" Version="7.1.0-rc.2" />
+  <ItemGroup>
+    <PackageReference Include="System.Management.Automation" Version="7.4.13">
+      <ExcludeAssets>contentFiles</ExcludeAssets>
+      <PrivateAssets>All</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.PowerShell.Pager" Version="1.0.0" />
   </ItemGroup>
 
   <ItemGroup>

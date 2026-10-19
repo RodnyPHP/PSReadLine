@@ -45,6 +45,8 @@ namespace Microsoft.PowerShell
         private static Dictionary<PSKeyInfo, KeyHandler> _viChordYTable;
         private static Dictionary<PSKeyInfo, KeyHandler> _viChordDGTable;
 
+        private static Dictionary<PSKeyInfo, KeyHandler> _viChordTextObjectsTable;
+
         private static Dictionary<PSKeyInfo, Dictionary<PSKeyInfo, KeyHandler>> _viCmdChordTable;
         private static Dictionary<PSKeyInfo, Dictionary<PSKeyInfo, KeyHandler>> _viInsChordTable;
 
@@ -72,7 +74,7 @@ namespace Microsoft.PowerShell
                 { Keys.CtrlSpace,       MakeKeyHandler(PossibleCompletions,    "PossibleCompletions") },
                 { Keys.Tab,             MakeKeyHandler(ViTabCompleteNext,      "ViTabCompleteNext") },
                 { Keys.ShiftTab,        MakeKeyHandler(ViTabCompletePrevious,  "ViTabCompletePrevious") },
-                { Keys.CtrlU,           MakeKeyHandler(BackwardDeleteLine,     "BackwardDeleteLine") },
+                { Keys.CtrlU,           MakeKeyHandler(BackwardDeleteInput,    "BackwardDeleteInput") },
                 { Keys.CtrlV,           MakeKeyHandler(Paste,                  "Paste") },
                 { Keys.CtrlC,           MakeKeyHandler(CancelLine,             "CancelLine") },
                 { Keys.CtrlL,           MakeKeyHandler(ClearScreen,            "ClearScreen") },
@@ -80,14 +82,19 @@ namespace Microsoft.PowerShell
                 { Keys.CtrlY,           MakeKeyHandler(Redo,                   "Redo") },
                 { Keys.CtrlZ,           MakeKeyHandler(Undo,                   "Undo") },
                 { Keys.CtrlBackspace,   MakeKeyHandler(BackwardKillWord,       "BackwardKillWord") },
-                { Keys.CtrlEnd,         MakeKeyHandler(ForwardDeleteLine,      "ForwardDeleteLine") },
-                { Keys.CtrlHome,        MakeKeyHandler(BackwardDeleteLine,     "BackwardDeleteLine") },
+                { Keys.CtrlEnd,         MakeKeyHandler(ForwardDeleteInput,     "ForwardDeleteInput") },
+                { Keys.CtrlHome,        MakeKeyHandler(BackwardDeleteInput,    "BackwardDeleteInput") },
                 { Keys.CtrlRBracket,    MakeKeyHandler(GotoBrace,              "GotoBrace") },
                 { Keys.F3,              MakeKeyHandler(CharacterSearch,        "CharacterSearch") },
                 { Keys.ShiftF3,         MakeKeyHandler(CharacterSearchBackward,"CharacterSearchBackward") },
                 { Keys.CtrlAltQuestion, MakeKeyHandler(ShowKeyBindings,        "ShowKeyBindings") },
-                { Keys.CtrlR,           MakeKeyHandler(ViSearchHistoryBackward,"ViSearchHistoryBackward") },
-                { Keys.CtrlS,           MakeKeyHandler(SearchForward,          "SearchForward") },
+                { Keys.CtrlR,           MakeKeyHandler(ReverseSearchHistory,   "ReverseSearchHistory") },
+                { Keys.CtrlS,           MakeKeyHandler(ForwardSearchHistory,   "ForwardSearchHistory") },
+                { Keys.CtrlG,           MakeKeyHandler(Abort,                  "Abort") },
+                { Keys.AltH,            MakeKeyHandler(ShowParameterHelp,      "ShowParameterHelp") },
+                { Keys.F1,              MakeKeyHandler(ShowCommandHelp,        "ShowCommandHelp") },
+                { Keys.F2,              MakeKeyHandler(SwitchPredictionView,   "SwitchPredictionView") },
+                { Keys.F4,              MakeKeyHandler(ShowFullPredictionTooltip, "ShowFullPredictionTooltip") },
             };
 
             // Some bindings are not available on certain platforms
@@ -120,13 +127,13 @@ namespace Microsoft.PowerShell
                 { Keys.CtrlC,           MakeKeyHandler(CancelLine,           "CancelLine") },
                 { Keys.CtrlL,           MakeKeyHandler(ClearScreen,          "ClearScreen") },
                 { Keys.CtrlT,           MakeKeyHandler(SwapCharacters,       "SwapCharacters") },
-                { Keys.CtrlU,           MakeKeyHandler(BackwardDeleteLine,   "BackwardDeleteLine") },
+                { Keys.CtrlU,           MakeKeyHandler(BackwardDeleteInput,  "BackwardDeleteInput") },
                 { Keys.CtrlW,           MakeKeyHandler(BackwardDeleteWord,   "BackwardDeleteWord") },
                 { Keys.CtrlY,           MakeKeyHandler(Redo,                 "Redo") },
                 { Keys.CtrlZ,           MakeKeyHandler(Undo,                 "Undo") },
                 { Keys.CtrlBackspace,   MakeKeyHandler(BackwardKillWord,     "BackwardKillWord") },
-                { Keys.CtrlEnd,         MakeKeyHandler(ForwardDeleteLine,    "ForwardDeleteLine") },
-                { Keys.CtrlHome,        MakeKeyHandler(BackwardDeleteLine,   "BackwardDeleteLine") },
+                { Keys.CtrlEnd,         MakeKeyHandler(ForwardDeleteInput,   "ForwardDeleteInput") },
+                { Keys.CtrlHome,        MakeKeyHandler(BackwardDeleteInput,  "BackwardDeleteInput") },
                 { Keys.CtrlRBracket,    MakeKeyHandler(GotoBrace,            "GotoBrace") },
                 { Keys.F3,              MakeKeyHandler(CharacterSearch,      "CharacterSearch") },
                 { Keys.ShiftF3,         MakeKeyHandler(CharacterSearchBackward, "CharacterSearchBackward") },
@@ -199,15 +206,18 @@ namespace Microsoft.PowerShell
                 { Keys.Uphat,           MakeKeyHandler(GotoFirstNonBlankOfLine, "GotoFirstNonBlankOfLine") },
                 { Keys.Underbar,        MakeKeyHandler(GotoFirstNonBlankOfLine, "GotoFirstNonBlankOfLine") },
                 { Keys.Tilde,           MakeKeyHandler(InvertCase,           "InvertCase") },
-                { Keys.Slash,           MakeKeyHandler(ViSearchHistoryBackward,   "ViSearchHistoryBackward") },
-                { Keys.CtrlR,           MakeKeyHandler(ViSearchHistoryBackward,   "ViSearchHistoryBackward") },
+                { Keys.Slash,           MakeKeyHandler(ViSearchHistoryBackward, "ViSearchHistoryBackward") },
                 { Keys.Question,        MakeKeyHandler(SearchForward,        "SearchForward") },
-                { Keys.CtrlS,           MakeKeyHandler(SearchForward,        "SearchForward") },
+                { Keys.CtrlR,           MakeKeyHandler(ReverseSearchHistory, "ReverseSearchHistory") },
+                { Keys.CtrlS,           MakeKeyHandler(ForwardSearchHistory, "ForwardSearchHistory") },
+                { Keys.CtrlG,           MakeKeyHandler(Abort,                "Abort") },
                 { Keys.Plus,            MakeKeyHandler(NextHistory,          "NextHistory") },
                 { Keys.Minus,           MakeKeyHandler(PreviousHistory,      "PreviousHistory") },
                 { Keys.Period,          MakeKeyHandler(RepeatLastCommand,    "RepeatLastCommand") },
                 { Keys.Semicolon,       MakeKeyHandler(RepeatLastCharSearch, "RepeatLastCharSearch") },
                 { Keys.Comma,           MakeKeyHandler(RepeatLastCharSearchBackwards, "RepeatLastCharSearchBackwards") },
+                { Keys.AltH,            MakeKeyHandler(ShowParameterHelp,     "ShowParameterHelp") },
+                { Keys.F1,              MakeKeyHandler(ShowCommandHelp,       "ShowCommandHelp") },
             };
 
             // Some bindings are not available on certain platforms
@@ -215,7 +225,6 @@ namespace Microsoft.PowerShell
             {
                 _viCmdKeyMap.Add(Keys.CtrlDelete, MakeKeyHandler(KillWord, "KillWord"));
             }
-
 
             _viChordDTable = new Dictionary<PSKeyInfo, KeyHandler>
             {
@@ -231,6 +240,7 @@ namespace Microsoft.PowerShell
                 { Keys.ucG,             MakeKeyHandler( DeleteEndOfBuffer,            "DeleteEndOfBuffer") },
                 { Keys.ucE,             MakeKeyHandler( ViDeleteEndOfGlob,            "ViDeleteEndOfGlob") },
                 { Keys.H,               MakeKeyHandler( BackwardDeleteChar,           "BackwardDeleteChar") },
+                { Keys.I,               MakeKeyHandler( ViChordDeleteTextObject,      "ChordViTextObject") },               
                 { Keys.J,               MakeKeyHandler( DeleteNextLines,              "DeleteNextLines") },
                 { Keys.K,               MakeKeyHandler( DeletePreviousLines,          "DeletePreviousLines") },
                 { Keys.L,               MakeKeyHandler( DeleteChar,                   "DeleteChar") },
@@ -289,6 +299,11 @@ namespace Microsoft.PowerShell
                 { Keys.Percent,         MakeKeyHandler( ViYankPercent,         "ViYankPercent") },
             };
 
+            _viChordTextObjectsTable = new Dictionary<PSKeyInfo, KeyHandler>
+            {
+                { Keys.W,               MakeKeyHandler(ViHandleTextObject,     "WordTextObject")},
+            };
+            
             _viChordDGTable = new Dictionary<PSKeyInfo, KeyHandler>
             {
                 { Keys.G,               MakeKeyHandler( DeleteRelativeLines,   "DeleteRelativeLines") },

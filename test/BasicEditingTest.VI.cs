@@ -137,7 +137,7 @@ namespace Test
             Test("", Keys(
                 "0123(567)9ab", _.Escape, "hhh", CheckThat(() => AssertCursorLeftIs(8)),
                 'c', _.Percent, "45678", _.Escape, CheckThat(() => AssertLineIs("0123456789ab")), CheckThat(() => AssertCursorLeftIs(8)),
-                'u', CheckThat(() => AssertLineIs("0123(567)9ab")), CheckThat(() => AssertCursorLeftIs(9)),
+                'u', CheckThat(() => AssertLineIs("0123(567)9ab")), CheckThat(() => AssertCursorLeftIs(4)),
                 'U'
                 ));
             Test("", Keys(
@@ -381,8 +381,8 @@ namespace Test
             Test("0123", Keys(
                 "0123", _.Escape,
                 "d1h", CheckThat(() => AssertLineIs("013")),
-                "ud3h", CheckThat(() => AssertLineIs("3")),
-                "ud4h", CheckThat(() => AssertLineIs("3")),
+                "u$d3h", CheckThat(() => AssertLineIs("3")),
+                "u$d4h", CheckThat(() => AssertLineIs("3")),
                 "u0dl", CheckThat(() => AssertLineIs("123")),
                 "u0d4l", CheckThat(() => AssertLineIs("")),
                 "u0d5l", CheckThat(() => AssertLineIs("")),
@@ -432,20 +432,20 @@ namespace Test
             Test("nslookup www.google.com", Keys(
                 "nslookup www", _.Period, "google", _.Period, "com", _.Escape,
                 "d1b", CheckThat(() => AssertLineIs("nslookup www.google.m")),
-                "ud2b", CheckThat(() => AssertLineIs("nslookup www.googlem")),
-                "ud3b", CheckThat(() => AssertLineIs("nslookup www.m")),
-                "ud4b", CheckThat(() => AssertLineIs("nslookup wwwm")),
-                "ud5b", CheckThat(() => AssertLineIs("nslookup m")),
-                "ud6b", CheckThat(() => AssertLineIs("m")),
-                "ud7b", CheckThat(() => AssertLineIs("m")),
+                "u$d2b", CheckThat(() => AssertLineIs("nslookup www.googlem")),
+                "u$d3b", CheckThat(() => AssertLineIs("nslookup www.m")),
+                "u$d4b", CheckThat(() => AssertLineIs("nslookup wwwm")),
+                "u$d5b", CheckThat(() => AssertLineIs("nslookup m")),
+                "u$d6b", CheckThat(() => AssertLineIs("m")),
+                "u$d7b", CheckThat(() => AssertLineIs("m")),
                 'u'
                 ));
 
             Test("nslookup www.google.com", Keys(
                 "nslookup www", _.Period, "google", _.Period, "com", _.Escape,
                 "d1B", CheckThat(() => AssertLineIs("nslookup m")),
-                "ud2B", CheckThat(() => AssertLineIs("m")),
-                "ud3B", CheckThat(() => AssertLineIs("m")),
+                "u$d2B", CheckThat(() => AssertLineIs("m")),
+                "u$d3B", CheckThat(() => AssertLineIs("m")),
                 'u'
                 ));
 
@@ -494,8 +494,6 @@ namespace Test
         {
             TestSetup(KeyMode.Vi);
 
-            int continuationPrefixLength = PSConsoleReadLineOptions.DefaultContinuationPrompt.Length;
-
             Test("\"\n\"", Keys(
                  _.DQuote, _.Enter,
                  "one", _.Enter,
@@ -503,7 +501,7 @@ namespace Test
                  "three", _.Enter,
                  _.DQuote, _.Escape,
                  "kl", // go to the 'hree' portion of "three"
-                 "2dk", CheckThat(() => AssertCursorLeftIs(continuationPrefixLength + 0))
+                 "2dk", CheckThat(() => AssertCursorLeftIs(ContinuationPromptLength + 0))
                 ));
         }
 
@@ -512,8 +510,6 @@ namespace Test
         {
             TestSetup(KeyMode.Vi);
 
-            int continuationPrefixLength = PSConsoleReadLineOptions.DefaultContinuationPrompt.Length;
-
             Test("\"\none\ntwo\n\"", Keys(
                  _.DQuote, _.Enter,
                  "one", _.Enter,
@@ -521,11 +517,27 @@ namespace Test
                  "three", _.Enter,
                  _.DQuote, _.Escape,
                  "dk",
-                 CheckThat(() => AssertCursorLeftIs(continuationPrefixLength + 0)),
+                 CheckThat(() => AssertCursorLeftIs(ContinuationPromptLength + 0)),
                  CheckThat(() => AssertCursorTopIs(2)),
                  CheckThat(() => AssertLineIs("\"\none\ntwo")),
                  // finish the buffer to close the multiline string
                  _.A, _.Enter, _.DQuote, _.Escape
+                ));
+        }
+
+        // Defect #1673
+        [SkippableFact]
+        public void ViDelete_UndoCursorPosition()
+        {
+            TestSetup(KeyMode.Vi);
+
+            Test("one", Keys(
+                "one", _.Escape,
+                "h", // move back to the 'n' character
+                "x", CheckThat(() => AssertLineIs("oe")),
+
+                // undo
+                "u", CheckThat(() => AssertCursorLeftIs(1))
                 ));
         }
 
@@ -555,8 +567,6 @@ namespace Test
         {
             TestSetup(KeyMode.Vi);
 
-            int continuationPrefixLength = PSConsoleReadLineOptions.DefaultContinuationPrompt.Length;
-
             Test("\"\no\nthree\n\"", Keys(
                 _.DQuote, _.Enter,
                 "one", _.Enter,
@@ -566,8 +576,26 @@ namespace Test
                 "kkkl", // go to the 'ne' portion of "one"
                 // delete to the end of the next line
                 "2d$",
-                CheckThat(() => AssertCursorLeftIs(continuationPrefixLength + 0))
+                CheckThat(() => AssertCursorLeftIs(ContinuationPromptLength + 0))
                 ));
+        }
+
+        [SkippableFact]
+        public void ViBackwardDeleteLine()
+        {
+            TestSetup(KeyMode.Vi);
+
+            Test("\"\nsome words\n\"", Keys(
+
+                _.DQuote, _.Enter,
+                "   this is a line with some words", _.Enter,
+                _.DQuote, _.Escape,
+                "k6W",
+                CheckThat(() => AssertCursorLeftIs(ContinuationPromptLength + 23)),
+                // delete from first non blank of line
+                "d0",
+                CheckThat(() => AssertCursorLeftIs(ContinuationPromptLength))
+            ));
         }
 
         [SkippableFact]
@@ -575,17 +603,15 @@ namespace Test
         {
             TestSetup(KeyMode.Vi);
 
-            int continuationPrefixLength = PSConsoleReadLineOptions.DefaultContinuationPrompt.Length;
-
             Test("\"\n   some spaces\n\"", Keys(
                 _.DQuote, _.Enter,
                 "   this is a line with some spaces", _.Enter,
                 _.DQuote, _.Escape,
                 "k6W",
-                CheckThat(() => AssertCursorLeftIs(continuationPrefixLength + 23)),
+                CheckThat(() => AssertCursorLeftIs(ContinuationPromptLength + 23)),
                 // delete from first non blank of line
                 "d^",
-                CheckThat(() => AssertCursorLeftIs(continuationPrefixLength + 3))
+                CheckThat(() => AssertCursorLeftIs(ContinuationPromptLength + 3))
             ));
         }
 
@@ -594,8 +620,6 @@ namespace Test
         {
             TestSetup(KeyMode.Vi);
 
-            int continuationPrefixLength = PSConsoleReadLineOptions.DefaultContinuationPrompt.Length;
-
             Test("\"\n\"", Keys(
                  _.DQuote, _.Enter,
                  "one", _.Enter,
@@ -603,7 +627,7 @@ namespace Test
                  "three", _.Enter,
                  _.DQuote, _.Escape,
                  "kkkl", // go to the 'ne' portion of "one"
-                 "2dj", CheckThat(() => AssertCursorLeftIs(continuationPrefixLength + 0))
+                 "2dj", CheckThat(() => AssertCursorLeftIs(ContinuationPromptLength + 0))
                 ));
         }
 
@@ -611,8 +635,6 @@ namespace Test
         public void ViDeleteRelativeLines()
         {
             TestSetup(KeyMode.Vi);
-
-            var continuationPrefixLength = PSConsoleReadLineOptions.DefaultContinuationPrompt.Length;
 
             Test("\"\nthree\n\"", Keys(
                 _.DQuote, _.Enter,
@@ -623,7 +645,7 @@ namespace Test
                 "kkl", // go to the 'wo' portion of "two"
                 // delete from line 2 to the current line (3)
                 "2dgg",
-                CheckThat(() => AssertCursorLeftIs(continuationPrefixLength + 0))
+                CheckThat(() => AssertCursorLeftIs(ContinuationPromptLength + 0))
                 ));
 
             Test("\"\none\nthree\n\"", Keys(
@@ -635,7 +657,7 @@ namespace Test
                 "kkl", // go to the 'wo' portion of "two"
                 // delete the current line (3)
                 "3dgg",
-                CheckThat(() => AssertCursorLeftIs(continuationPrefixLength + 0))
+                CheckThat(() => AssertCursorLeftIs(ContinuationPromptLength + 0))
                 ));
 
             Test("\"\none\n\"", Keys(
@@ -647,7 +669,7 @@ namespace Test
                 "kkl", // go to the 'wo' portion of "two"
                 // delete from the current line (3) to line 4
                 "4dgg",
-                CheckThat(() => AssertCursorLeftIs(continuationPrefixLength + 0))
+                CheckThat(() => AssertCursorLeftIs(ContinuationPromptLength + 0))
                 ));
         }
 
@@ -665,9 +687,9 @@ namespace Test
             Test("0 2+4 6", Keys(
                 "0 2+4 6", _.Escape, CheckThat(() => AssertLineIs("0 2+4 6")), CheckThat(() => AssertCursorLeftIs(6)),
                 "dB", CheckThat(() => AssertLineIs("0 6")), CheckThat(() => AssertCursorLeftIs(2)),
-                "u", CheckThat(() => AssertLineIs("0 2+4 6")), CheckThat(() => AssertCursorLeftIs(6)),
-                "2dB", CheckThat(() => AssertLineIs("6")), CheckThat(() => AssertCursorLeftIs(0)),
-                "u", CheckThat(() => AssertLineIs("0 2+4 6")), CheckThat(() => AssertCursorLeftIs(6))
+                "u", CheckThat(() => AssertLineIs("0 2+4 6")), CheckThat(() => AssertCursorLeftIs(2)),
+                "$2dB", CheckThat(() => AssertLineIs("6")), CheckThat(() => AssertCursorLeftIs(0)),
+                "u", CheckThat(() => AssertLineIs("0 2+4 6")), CheckThat(() => AssertCursorLeftIs(0))
                 ));
 
             Test("0 2+4 6", Keys(
@@ -677,7 +699,7 @@ namespace Test
                 "u0ldE", CheckThat(() => AssertLineIs("0 6")), CheckThat(() => AssertCursorLeftIs(1)),
                 "u0l2dE", CheckThat(() => AssertLineIs("0")), CheckThat(() => AssertCursorLeftIs(0)),
                 "u03dE", CheckThat(() => AssertLineIs("")), CheckThat(() => AssertCursorLeftIs(0)),
-                "u", CheckThat(() => AssertLineIs("0 2+4 6")), CheckThat(() => AssertCursorLeftIs(6))
+                "u", CheckThat(() => AssertLineIs("0 2+4 6")), CheckThat(() => AssertCursorLeftIs(0))
                 ));
 
             Test("0 2+4 6", Keys(
@@ -688,7 +710,7 @@ namespace Test
                 "u0l2dW", CheckThat(() => AssertLineIs("06")), CheckThat(() => AssertCursorLeftIs(1)),
                 "u0l3dW", CheckThat(() => AssertLineIs("0")), CheckThat(() => AssertCursorLeftIs(0)),
                 "u03dW", CheckThat(() => AssertLineIs("")), CheckThat(() => AssertCursorLeftIs(0)),
-                "u", CheckThat(() => AssertLineIs("0 2+4 6")), CheckThat(() => AssertCursorLeftIs(6))
+                "u", CheckThat(() => AssertLineIs("0 2+4 6")), CheckThat(() => AssertCursorLeftIs(0))
                 ));
         }
 
@@ -718,7 +740,7 @@ namespace Test
             Test("(1{3{5)789)b}c", Keys(
                 "(1{3{5)789)b}c", _.Escape, CheckThat(() => AssertLineIs("(1{3{5)789)b}c")), CheckThat(() => AssertCursorLeftIs(13)),
                 "hd", _.Percent, CheckThat(() => AssertLineIs("(1{3c")), CheckThat(() => AssertCursorLeftIs(4)),
-                "u", CheckThat(() => AssertLineIs("(1{3{5)789)b}c")), CheckThat(() => AssertCursorLeftIs(13))
+                "u", CheckThat(() => AssertLineIs("(1{3{5)789)b}c")), CheckThat(() => AssertCursorLeftIs(4))
                 ));
 
             Test("(1{3[5)7}9)b]", Keys(
@@ -730,13 +752,13 @@ namespace Test
             Test("(1{3[5)7}9)b]c", Keys(
                 "(1{3[5)7}9)b]c", _.Escape, CheckThat(() => AssertLineIs("(1{3[5)7}9)b]c")), CheckThat(() => AssertCursorLeftIs(13)),
                 "hhhhhd", _.Percent, CheckThat(() => AssertLineIs("(19)b]c")), CheckThat(() => AssertCursorLeftIs(2)),
-                "u", CheckThat(() => AssertLineIs("(1{3[5)7}9)b]c")), CheckThat(() => AssertCursorLeftIs(9))
+                "u", CheckThat(() => AssertLineIs("(1{3[5)7}9)b]c")), CheckThat(() => AssertCursorLeftIs(2))
                 ));
 
             Test("(1{3[5)7}9)b]d", Keys(
                 "(1{3[5)7}9)b]d", _.Escape, CheckThat(() => AssertLineIs("(1{3[5)7}9)b]d")), CheckThat(() => AssertCursorLeftIs(13)),
                 "h", _.Percent, "d", _.Percent, CheckThat(() => AssertLineIs("(1{3d")), CheckThat(() => AssertCursorLeftIs(4)),
-                "u", CheckThat(() => AssertLineIs("(1{3[5)7}9)b]d")), CheckThat(() => AssertCursorLeftIs(13))
+                "u", CheckThat(() => AssertLineIs("(1{3[5)7}9)b]d")), CheckThat(() => AssertCursorLeftIs(4))
                 ));
 
             Test("(1{3[5)7}9)b]", Keys(
@@ -750,7 +772,7 @@ namespace Test
             Test("(1{3[5)7}9)b]c", Keys(
                 "(1{3[5)7}9)b]c", _.Escape, CheckThat(() => AssertLineIs("(1{3[5)7}9)b]c")), CheckThat(() => AssertCursorLeftIs(13)),
                 "hhhhh", _.Percent, "d", _.Percent, CheckThat(() => AssertLineIs("(19)b]c")), CheckThat(() => AssertCursorLeftIs(2)),
-                "u", CheckThat(() => AssertLineIs("(1{3[5)7}9)b]c")), CheckThat(() => AssertCursorLeftIs(9))
+                "u", CheckThat(() => AssertLineIs("(1{3[5)7}9)b]c")), CheckThat(() => AssertCursorLeftIs(2))
                 ));
 
             Test("012 [ 67 ] bc", Keys(
@@ -759,7 +781,7 @@ namespace Test
                 _.Percent, CheckThat(() => AssertCursorLeftIs(4)),
                 _.Percent, CheckThat(() => AssertCursorLeftIs(9)),
                 'd', _.Percent, CheckThat(() => AssertLineIs("012  bc")),
-                "uh", CheckThat(() => AssertLineIs("012 [ 67 ] bc")), CheckThat(() => AssertCursorLeftIs(9)),
+                "u", CheckThat(() => AssertLineIs("012 [ 67 ] bc")), CheckThat(() => AssertCursorLeftIs(4)),
                 'c', _.Percent, "99", _.Escape, CheckThat(() => AssertLineIs("012 99 bc")),
                 'u'
                 ));
@@ -770,10 +792,9 @@ namespace Test
                 _.Percent, CheckThat(() => AssertCursorLeftIs(4)),
                 _.Percent, CheckThat(() => AssertCursorLeftIs(9)),
                 'd', _.Percent, CheckThat(() => AssertLineIs("012  bc")), CheckThat(() => AssertCursorLeftIs(4)),
-                'u', CheckThat(() => AssertLineIs("012 { 67 } bc")), CheckThat(() => AssertCursorLeftIs(10)),
-                'h', _.Percent, CheckThat(() => AssertCursorLeftIs(4)),
+                'u', CheckThat(() => AssertLineIs("012 { 67 } bc")), CheckThat(() => AssertCursorLeftIs(4)),
                 'd', _.Percent, CheckThat(() => AssertLineIs("012  bc")), CheckThat(() => AssertCursorLeftIs(4)),
-                'u', CheckThat(() => AssertCursorLeftIs(10))
+                'u', CheckThat(() => AssertCursorLeftIs(4))
                 ));
 
             Test("012 ( 67 ) bc", Keys(
@@ -782,10 +803,9 @@ namespace Test
                 _.Percent, CheckThat(() => AssertCursorLeftIs(4)),
                 _.Percent, CheckThat(() => AssertCursorLeftIs(9)),
                 'd', _.Percent, CheckThat(() => AssertLineIs("012  bc")), CheckThat(() => AssertCursorLeftIs(4)),
-                'u', CheckThat(() => AssertLineIs("012 ( 67 ) bc")), CheckThat(() => AssertCursorLeftIs(10)),
-                'h', _.Percent, CheckThat(() => AssertCursorLeftIs(4)),
+                'u', CheckThat(() => AssertLineIs("012 ( 67 ) bc")), CheckThat(() => AssertCursorLeftIs(4)),
                 'd', _.Percent, CheckThat(() => AssertLineIs("012  bc")), CheckThat(() => AssertCursorLeftIs(4)),
-                'u', CheckThat(() => AssertCursorLeftIs(10))
+                'u', CheckThat(() => AssertCursorLeftIs(4))
                 ));
         }
 
@@ -845,9 +865,9 @@ namespace Test
             Test("012 45", Keys(
                 "012 45", _.Escape,
                 "0cwabc", _.Escape, CheckThat(() => AssertLineIs("abc 45")),
-                "u", CheckThat(() => AssertLineIs("012 45")), CheckThat(() => AssertCursorLeftIs(4)),
+                "u", CheckThat(() => AssertLineIs("012 45")), CheckThat(() => AssertCursorLeftIs(0)),
                 "0cwabc", _.Escape, CheckThat(() => AssertLineIs("abc 45")),
-                "u", CheckThat(() => AssertCursorLeftIs(4)),
+                "u", CheckThat(() => AssertCursorLeftIs(0)),
                 "0cwabc", _.Escape, "wcwef", _.Escape, CheckThat(() => AssertLineIs("abc ef")),
                 "uu", CheckThat(() => AssertLineIs("012 45")),
                 "02cwabcdef", _.Escape, CheckThat(() => AssertLineIs("abcdef")),
@@ -943,7 +963,6 @@ namespace Test
         [SkippableFact]
         public void ViInsertLine()
         {
-            int adder = PSConsoleReadLineOptions.DefaultContinuationPrompt.Length;
             TestSetup(KeyMode.Vi);
 
             Test("line1\n", Keys(
@@ -951,8 +970,8 @@ namespace Test
                 ));
 
             Test("\nline1", Keys(
-                _.Escape, "oline1", CheckThat(() => AssertCursorLeftIs(5 + adder)), CheckThat(() => AssertLineIs("\nline1")),
-                _.Escape, CheckThat(() => AssertCursorLeftIs(4 + adder))
+                _.Escape, "oline1", CheckThat(() => AssertCursorLeftIs(5 + ContinuationPromptLength)), CheckThat(() => AssertLineIs("\nline1")),
+                _.Escape, CheckThat(() => AssertCursorLeftIs(4 + ContinuationPromptLength))
                 ));
 
             Test("", Keys(
@@ -976,10 +995,10 @@ namespace Test
                 ));
 
             Test("", Keys(
-                _.Escape, "oline4", CheckThat(() => AssertLineIs("\nline4")), CheckThat(() => AssertCursorLeftIs(5 + adder)),
-                _.Escape, "Oline2", CheckThat(() => AssertLineIs("\nline2\nline4")), CheckThat(() => AssertCursorLeftIs(5 + adder)),
+                _.Escape, "oline4", CheckThat(() => AssertLineIs("\nline4")), CheckThat(() => AssertCursorLeftIs(5 + ContinuationPromptLength)),
+                _.Escape, "Oline2", CheckThat(() => AssertLineIs("\nline2\nline4")), CheckThat(() => AssertCursorLeftIs(5 + ContinuationPromptLength)),
                 _.Escape, "oline3", CheckThat(() => AssertLineIs("\nline2\nline3\nline4")),
-                _.Escape, CheckThat(() => AssertLineIs("\nline2\nline3\nline4")), CheckThat(() => AssertCursorLeftIs(4 + adder)),
+                _.Escape, CheckThat(() => AssertLineIs("\nline2\nline3\nline4")), CheckThat(() => AssertCursorLeftIs(4 + ContinuationPromptLength)),
                 'u', CheckThat(() => AssertLineIs("\nline2\nline4")),
                 'u', CheckThat(() => AssertLineIs("\nline4")),
                 'u'
@@ -1017,25 +1036,25 @@ namespace Test
             Test("0123456", Keys(
                 "0123456", _.Escape, CheckThat(() => AssertLineIs("0123456")),
                 "0cf6abc", _.Escape, CheckThat(() => AssertLineIs("abc")),
-                'u', CheckThat(() => AssertLineIs("0123456")), CheckThat(() => AssertCursorLeftIs(6)),
+                'u', CheckThat(() => AssertLineIs("0123456")), CheckThat(() => AssertCursorLeftIs(0)),
                 "0cf5abc", _.Escape, CheckThat(() => AssertLineIs("abc6")),
-                'u', CheckThat(() => AssertLineIs("0123456")), CheckThat(() => AssertCursorLeftIs(6)),
+                'u', CheckThat(() => AssertLineIs("0123456")), CheckThat(() => AssertCursorLeftIs(0)),
                 "0lcf6abc", _.Escape, CheckThat(() => AssertLineIs("0abc")),
-                'u', CheckThat(() => AssertLineIs("0123456")), CheckThat(() => AssertCursorLeftIs(6)),
-                "cf6abc", _.Escape, CheckThat(() => AssertLineIs("0123456bc")),
+                'u', CheckThat(() => AssertLineIs("0123456")), CheckThat(() => AssertCursorLeftIs(1)),
+                "$cf6abc", _.Escape, CheckThat(() => AssertLineIs("0123456bc")),
                 'u'
                 ));
 
             Test("0123456", Keys(
                 "0123456", _.Escape, CheckThat(() => AssertLineIs("0123456")),
                 "cF0abc", _.Escape, CheckThat(() => AssertLineIs("abc6")),
-                'u', CheckThat(() => AssertLineIs("0123456")), CheckThat(() => AssertCursorLeftIs(6)),
-                "cF1abc", _.Escape, CheckThat(() => AssertLineIs("0abc6")),
-                'u', CheckThat(() => AssertLineIs("0123456")), CheckThat(() => AssertCursorLeftIs(6)),
-                "hcF0abc", _.Escape, CheckThat(() => AssertLineIs("abc56")),
-                'u', CheckThat(() => AssertLineIs("0123456")), CheckThat(() => AssertCursorLeftIs(5)),
-                "hcF1abc", _.Escape, CheckThat(() => AssertLineIs("0abc456")),
-                'u', CheckThat(() => AssertLineIs("0123456")), CheckThat(() => AssertCursorLeftIs(4)),
+                'u', CheckThat(() => AssertLineIs("0123456")), CheckThat(() => AssertCursorLeftIs(0)),
+                "$cF1abc", _.Escape, CheckThat(() => AssertLineIs("0abc6")),
+                'u', CheckThat(() => AssertLineIs("0123456")), CheckThat(() => AssertCursorLeftIs(1)),
+                "$hcF0abc", _.Escape, CheckThat(() => AssertLineIs("abc56")),
+                'u', CheckThat(() => AssertLineIs("0123456")), CheckThat(() => AssertCursorLeftIs(0)),
+                "$hhcF1abc", _.Escape, CheckThat(() => AssertLineIs("0abc456")),
+                'u', CheckThat(() => AssertLineIs("0123456")), CheckThat(() => AssertCursorLeftIs(1)),
                 "0cF0abc", _.Escape, CheckThat(() => AssertLineIs("0bc123456")),
                 'u'
                 ));
@@ -1043,19 +1062,19 @@ namespace Test
             Test("0123456", Keys(
                 "0123456", _.Escape, CheckThat(() => AssertLineIs("0123456")),
                 "0ct6abc", _.Escape, CheckThat(() => AssertLineIs("abc6")),
-                'u', CheckThat(() => AssertLineIs("0123456")), CheckThat(() => AssertCursorLeftIs(6)),
+                'u', CheckThat(() => AssertLineIs("0123456")), CheckThat(() => AssertCursorLeftIs(0)),
                 "0lct6abc", _.Escape, CheckThat(() => AssertLineIs("0abc6")),
-                'u', CheckThat(() => AssertLineIs("0123456")), CheckThat(() => AssertCursorLeftIs(6)),
-                "ct6abc", _.Escape, CheckThat(() => AssertLineIs("0123456bc")),
+                'u', CheckThat(() => AssertLineIs("0123456")), CheckThat(() => AssertCursorLeftIs(1)),
+                "$ct6abc", _.Escape, CheckThat(() => AssertLineIs("0123456bc")),
                 'u'
                 ));
 
             Test("0123456", Keys(
                 "0123456", _.Escape, CheckThat(() => AssertLineIs("0123456")),
                 "cT1abc", _.Escape, CheckThat(() => AssertLineIs("01abc6")),
-                'u', CheckThat(() => AssertLineIs("0123456")), CheckThat(() => AssertCursorLeftIs(6)),
-                "hcT1abc", _.Escape, CheckThat(() => AssertLineIs("01abc56")),
-                'u', CheckThat(() => AssertLineIs("0123456")), CheckThat(() => AssertCursorLeftIs(5)),
+                'u', CheckThat(() => AssertLineIs("0123456")), CheckThat(() => AssertCursorLeftIs(2)),
+                "$hcT1abc", _.Escape, CheckThat(() => AssertLineIs("01abc56")),
+                'u', CheckThat(() => AssertLineIs("0123456")), CheckThat(() => AssertCursorLeftIs(2)),
                 "0cT0abc", _.Escape, CheckThat(() => AssertLineIs("0bc123456")),
                 'u'
                 ));
@@ -1086,6 +1105,89 @@ namespace Test
                 _.RightArrow, CheckThat(() => AssertCursorLeftIs(2)),
                 _.RightArrow, // 'RightArrow' again does nothing, but doesn't crash
                 "c"));
+        }
+
+        [SkippableFact]
+        public void ViDefect1281_1()
+        {
+            TestSetup(KeyMode.Vi);
+
+            Test("bcd", Keys(
+                "abcdabcd", _.Escape,
+
+                // return to the [B]eginning of the word,
+                // then [c]hange text un[t]il just before the [2]nd [b] character
+                // this leaves the cursor at the current position (0) but erases
+                // the "abcda" text portion, / switches to edit mode and
+                // positions the cursor just before the "bcd" text portion.
+
+                "Bc2tb",
+
+                // going back to normal mode again without having modified the buffer further
+                // even though the [c] command started an edit group, going back to normal
+                // mode closes the pending edit group.
+
+                _.Escape, CheckThat(() => AssertCursorLeftIs(0)),
+
+                // attempt to [c]hange text un[t]il just before the [2]nd [b] character again
+                // because the [b] character only appears once further down in the buffer
+                // relative to where the cursor position is – currently set to 0 - the command
+                // fails. Therefore, we are still in normal mode.
+                //
+                // as the command failed, the current edit group is now correctly closed.
+
+                "c2tb", CheckThat(() => AssertLineIs("bcd")),
+
+                // attempt to [c]hange text un[t]il just before the [2]nd [b] character a third time.
+                // this exercises a code path where starting a edit group while another
+                // pending edit group was previously started crashed PSRL.
+                //
+                // this should no longer crash as any started pending group is now properly closed if
+                // the command fails
+                "c2tb"
+                ));
+        }
+
+        [SkippableFact]
+        public void ViDefect1281_2()
+        {
+            TestSetup(KeyMode.Vi);
+
+            Test("abc", Keys(
+                "abc", _.Escape,
+
+                // 'cff' triggers `ViReplaceToChar` to delete until the character 'f'. But 'abc' doesn't
+                // have the letter 'f', so the started edit group should be ended and cursor is not moved.
+                "cff",
+                CheckThat(() => AssertCursorLeftIs(2)),
+
+                // the subsequent 'cc' calls `ViReplaceLine` to replace the current line with 'i', which
+                // starts a new edit group.
+                "ccip",
+                CheckThat(() => AssertLineIs("ip")),
+
+                // now we undo the 'cci' step, and accept the current command line, which should be 'abc'.
+                _.Escape, "u"
+                ));
+        }
+
+        [SkippableFact]
+        public void ViDefect1281_3()
+        {
+            TestSetup(KeyMode.Vi);
+
+            Test("bcd", Keys(
+                "bcd", _.Escape, _.LeftArrow, _.LeftArrow,
+
+                // 'a' triggers `ViInsertWithAppend` and we append 'iii' after 'b'.
+                "aiii",
+                CheckThat(() => AssertCursorLeftIs(4)),
+                CheckThat(() => AssertLineIs("biiicd")),
+
+                // now we undo the 'aiii' step, and accept the current command line,
+                // which should be 'bcd'.
+                _.Escape, "u"
+                ));
         }
     }
 }

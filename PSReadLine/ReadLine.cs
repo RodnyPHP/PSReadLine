@@ -25,26 +25,30 @@ using Microsoft.PowerShell.PSReadLine;
 
 namespace Microsoft.PowerShell
 {
-    [SuppressMessage("Microsoft.Design", "CA1032:ImplementStandardExceptionConstructors")]
-    [SuppressMessage("Microsoft.Usage", "CA2237:MarkISerializableTypesWithSerializable")]
     class ExitException : Exception { }
+    class LineAcceptedException : Exception { }
 
     public partial class PSConsoleReadLine : IPSConsoleReadLineMockableMethods
     {
         private const int ConsoleExiting = 1;
-
-        private const int CancellationRequested = 2;
-
-        private const int EventProcessingRequested = 3;
 
         // *must* be initialized in the static ctor
         // because the static member _clipboard depends upon it
         // for its own initialization
         private static readonly PSConsoleReadLine _singleton;
 
-        private static readonly CancellationToken _defaultCancellationToken = new CancellationTokenSource().Token;
+        // This is used by PowerShellEditorServices (the backend of the PowerShell VSCode extension)
+        // so that it can call PSReadLine from a delegate and not hit nested pipeline issues.
+        #pragma warning disable CS0649
+        private static Action<CancellationToken> _handleIdleOverride;
+        #pragma warning restore CS0649
 
         private bool _delayedOneTimeInitCompleted;
+        // This is used by AIShell to check if PSReadLine is initialized and ready to render.
+        #pragma warning disable CS0414
+        private bool _readLineReady;
+        #pragma warning restore CS0414
+        private bool _lineAcceptedExceptionThrown;
 
         private IPSConsoleReadLineMockableMethods _mockableMethods;
         private IConsole _console;
@@ -55,7 +59,6 @@ namespace Microsoft.PowerShell
         private Thread _readKeyThread;
         private AutoResetEvent _readKeyWaitHandle;
         private AutoResetEvent _keyReadWaitHandle;
-        private AutoResetEvent _forceEventWaitHandle;
         private CancellationToken _cancelReadCancellationToken;
         internal ManualResetEvent _closingWaitHandle;
         private WaitHandle[] _threadProcWaitHandles;
@@ -65,6 +68,7 @@ namespace Microsoft.PowerShell
         private readonly StringBuilder _statusBuffer;
         private bool _statusIsErrorMessage;
         private string _statusLinePrompt;
+        private string _acceptedCommandLine;
         private List<EditItem> _edits;
         private int _editGroupStart;
         private int _undoEditIndex;
@@ -151,16 +155,11 @@ namespace Microsoft.PowerShell
             while (true)
             {
                 // Wait until ReadKey tells us to read a key (or it's time to exit).
-                int handleId = WaitHandle.WaitAny(_singleton._threadProcWaitHandles);
+                int handleId = WaitHandle.WaitAny(_threadProcWaitHandles);
                 if (handleId == 1) // It was the _closingWaitHandle that was signaled.
                     break;
 
-                var localCancellationToken = _singleton._cancelReadCancellationToken;
                 ReadOneOrMoreKeys();
-                if (localCancellationToken.IsCancellationRequested)
-                {
-                    continue;
-                }
 
                 // One or more keys were read - let ReadKey know we're done.
                 _keyReadWaitHandle.Set();
@@ -180,9 +179,18 @@ namespace Microsoft.PowerShell
             // By waiting for a key on a different thread, our pipeline execution thread
             // (the thread ReadLine is called from) avoid being blocked in code that can't
             // be unblocked and instead blocks on events we control.
-
-            // First, set an event so the thread to read a key actually attempts to read a key.
-            _singleton._readKeyWaitHandle.Set();
+            if (_singleton._lineAcceptedExceptionThrown)
+            {
+                // If we threw a 'LineAcceptedException', it means that "AcceptLine" was called within an 'OnIdle' handler the last time
+                // this method was called, and thus we didn't wait for '_keyReadWaitHandle' to be signalled by the 'readkey thread'.
+                // In this case, we don't want to signal '_readKeyWaitHandle' again as the 'readkey thread' already got a chance to run.
+                _singleton._lineAcceptedExceptionThrown = false;
+            }
+            else
+            {
+                // Set an event so the 'readkey thread' actually attempts to read a key.
+                _singleton._readKeyWaitHandle.Set();
+            }
 
             int handleId;
             System.Management.Automation.PowerShell ps = null;
@@ -194,33 +202,51 @@ namespace Microsoft.PowerShell
                     // Next, wait for one of three things:
                     //   - a key is pressed
                     //   - the console is exiting
-                    //   - 300ms - to process events if we're idle
-                    //   - processing of events is requested externally
-                    //   - ReadLine cancellation is requested externally
+                    //   - 300ms timeout - to process events if we're idle
                     handleId = WaitHandle.WaitAny(_singleton._requestKeyWaitHandles, 300);
-                    if (handleId != WaitHandle.WaitTimeout && handleId != EventProcessingRequested)
+                    if (handleId != WaitHandle.WaitTimeout)
+                    {
                         break;
+                    }
+
+                    if (_handleIdleOverride is not null)
+                    {
+                        _handleIdleOverride(_singleton._cancelReadCancellationToken);
+                        continue;
+                    }
 
                     // If we timed out, check for event subscribers (which is just
                     // a hint that there might be an event waiting to be processed.)
                     var eventSubscribers = _singleton._engineIntrinsics?.Events.Subscribers;
+                    int bufferLen = _singleton._buffer.Length;
                     if (eventSubscribers?.Count > 0)
                     {
                         bool runPipelineForEventProcessing = false;
                         foreach (var sub in eventSubscribers)
                         {
-                            runPipelineForEventProcessing = true;
-                            if (sub.SourceIdentifier.Equals(PSEngineEvent.OnIdle, StringComparison.OrdinalIgnoreCase))
+                            if (string.Equals(sub.SourceIdentifier, PSEngineEvent.OnIdle, StringComparison.OrdinalIgnoreCase))
                             {
-                                // There is an OnIdle event.  We're idle because we timed out.  Normally
-                                // PowerShell generates this event, but PowerShell assumes the engine is not
-                                // idle because it called PSConsoleHostReadLine which isn't returning.
-                                // So we generate the event instead.
-                                _singleton._engineIntrinsics.Events.GenerateEvent(PSEngineEvent.OnIdle, null, null, null);
+                                // If the buffer is not empty, let's not consider we are idle because the user is in the middle of typing something.
+                                if (bufferLen > 0)
+                                {
+                                    continue;
+                                }
+
+                                // There is an 'OnIdle' event subscriber and we are idle because we timed out and the buffer is empty.
+                                // Normally PowerShell generates this event, but now PowerShell assumes the engine is not idle because
+                                // it called 'PSConsoleHostReadLine' which isn't returning. So we generate the event instead.
+                                runPipelineForEventProcessing = true;
+                                _singleton._engineIntrinsics.Events.GenerateEvent(
+                                    PSEngineEvent.OnIdle,
+                                    sender: null,
+                                    args: null,
+                                    extraData: null);
 
                                 // Break out so we don't genreate more than one 'OnIdle' event for a timeout.
                                 break;
                             }
+
+                            runPipelineForEventProcessing = true;
                         }
 
                         // If there are any event subscribers, run a tiny useless PowerShell pipeline
@@ -230,18 +256,49 @@ namespace Microsoft.PowerShell
                             if (ps == null)
                             {
                                 ps = System.Management.Automation.PowerShell.Create(RunspaceMode.CurrentRunspace);
-                                ps.AddScript("0", useLocalScope: true);
+                                ps.AddScript("[System.Diagnostics.DebuggerHidden()]param() 0", useLocalScope: true);
                             }
 
-                            // To detect output during possible event processing, see if the cursor moved
-                            // and rerender if so.
-                            var console = _singleton._console;
-                            var y = console.CursorTop;
+                            // To detect output during possible event processing, see if the cursor moved and rerender if so.
+                            int cursorTop = _singleton._console.CursorTop;
+
+                            // Start the pipeline to process events.
                             ps.Invoke();
-                            if (y != console.CursorTop)
+
+                            // Check if any event handler writes console output to the best of our effort, and adjust the initial coordinates in that case.
+                            //
+                            // I say "to the best of our effort" because the delegate handler for an event will mostly run on a background thread, and thus
+                            // there is no guarantee about when the delegate would finish. So in an extreme case, there could be race conditions in console
+                            // read/write: we are reading 'CursorTop' while the delegate is writing console output on a different thread.
+                            // There is no much we can do about that extreme case. However, our focus here is the 'OnIdle' event, and its handler is usually
+                            // a script block, which will run within the 'ps.Invoke()' call above.
+                            //
+                            // We detect new console output by checking if cursor top changed, but handle a very special case: an event handler changed our
+                            // buffer, by calling 'Insert' for example.
+                            // I know only checking on buffer length change doesn't cover the case where buffer changed but the length is the same. However,
+                            // we mainly want to cover buffer changes made by an 'OnIdle' event handler, and we trigger 'OnIdle' event only if the buffer is
+                            // empty. So, this check is efficient and good enough for that main scenario.
+                            // When our buffer was changed by an event handler, we assume that was all the event handler did and there was no direct console
+                            // output. So, we adjust the initial coordinates only if cursor top changed but there was no buffer change.
+                            int newCursorTop = _singleton._console.CursorTop;
+                            int newBufferLen = _singleton._buffer.Length;
+                            if (cursorTop != newCursorTop && bufferLen == newBufferLen)
                             {
-                                _singleton._initialY = console.CursorTop;
-                                _singleton.Render();
+                                _singleton._initialY = newCursorTop;
+                                if (bufferLen > 0)
+                                {
+                                    _singleton.Render();
+                                }
+                            }
+
+                            if (_singleton._inputAccepted && RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                            {
+                                // 'AcceptLine' was called by an 'OnIdle' handler.
+                                // In this case, we only want to break out of the loop and accept the current input on Windows, because
+                                // accepting input without a keystroke would leave the 'readkey thread' blocked on the 'ReadKey()' call,
+                                // and that will make all subsequent writes to console blocked on Linux and macOS until a key is pressed.
+                                _singleton._lineAcceptedExceptionThrown = true;
+                                throw new LineAcceptedException();
                             }
                         }
                     }
@@ -265,10 +322,12 @@ namespace Microsoft.PowerShell
                 throw new OperationCanceledException();
             }
 
-            if (handleId == CancellationRequested)
+            if (_singleton._cancelReadCancellationToken.IsCancellationRequested)
             {
-                // ReadLine was cancelled. Save the current line to be restored next time ReadLine
-                // is called, clear the buffer and throw an exception so we can return an empty string.
+                // ReadLine was cancelled. Dequeue the dummy input sent by the host, save the current
+                // line to be restored next time ReadLine is called, clear the buffer and throw an
+                // exception so we can return an empty string.
+                _singleton._queuedKeys.Dequeue();
                 _singleton.SaveCurrentLine();
                 _singleton._getNextHistoryIndex = _singleton._history.Count;
                 _singleton._current = 0;
@@ -302,11 +361,9 @@ namespace Microsoft.PowerShell
         /// after the prompt has been displayed.
         /// </summary>
         /// <returns>The complete command line.</returns>
-        public static string ReadLine(Runspace runspace, EngineIntrinsics engineIntrinsics)
+        public static string ReadLine(Runspace runspace, EngineIntrinsics engineIntrinsics, bool? lastRunStatus)
         {
-            // Use a default cancellation token instead of CancellationToken.None because the
-            // WaitHandle is shared and could be triggered accidently.
-            return ReadLine(runspace, engineIntrinsics, _defaultCancellationToken);
+            return ReadLine(runspace, engineIntrinsics, CancellationToken.None, lastRunStatus);
         }
 
         /// <summary>
@@ -314,7 +371,11 @@ namespace Microsoft.PowerShell
         /// ability to cancel ReadLine.
         /// </summary>
         /// <returns>The complete command line.</returns>
-        public static string ReadLine(Runspace runspace, EngineIntrinsics engineIntrinsics, CancellationToken cancellationToken)
+        public static string ReadLine(
+            Runspace runspace,
+            EngineIntrinsics engineIntrinsics,
+            CancellationToken cancellationToken,
+            bool? lastRunStatus)
         {
             var console = _singleton._console;
 
@@ -348,6 +409,11 @@ namespace Microsoft.PowerShell
                 catch {}
             }
 
+            if (lastRunStatus.HasValue)
+            {
+                _singleton.ReportExecutionStatus(lastRunStatus.Value);
+            }
+
             bool firstTime = true;
             while (true)
             {
@@ -359,8 +425,8 @@ namespace Microsoft.PowerShell
                         _singleton.Initialize(runspace, engineIntrinsics);
                     }
 
+                    _singleton._readLineReady = true;
                     _singleton._cancelReadCancellationToken = cancellationToken;
-                    _singleton._requestKeyWaitHandles[2] = _singleton._cancelReadCancellationToken.WaitHandle;
                     return _singleton.InputLoop();
                 }
                 catch (OperationCanceledException)
@@ -432,6 +498,8 @@ namespace Microsoft.PowerShell
                 }
                 finally
                 {
+                    _singleton._readLineReady = false;
+
                     try
                     {
                         // If we are closing, restoring the old console settings isn't needed,
@@ -482,15 +550,27 @@ namespace Microsoft.PowerShell
                 var moveToLineCommandCount = _moveToLineCommandCount;
                 var moveToEndOfLineCommandCount = _moveToEndOfLineCommandCount;
 
-                var key = ReadKey();
-                ProcessOneKey(key, _dispatchTable, ignoreIfNoAction: false, arg: null);
+                // We attempt to handle window resizing only once per a keybinding processing, because we assume the
+                // window resizing cannot and shouldn't happen within the processing of a given keybinding.
+                _handlePotentialResizing = true;
+
+                try
+                {
+                    var key = ReadKey();
+                    ProcessOneKey(key, _dispatchTable, ignoreIfNoAction: false, arg: null);
+                }
+                catch (LineAcceptedException)
+                {
+                    Debug.Assert(_inputAccepted, "LineAcceptedException should only be thrown when input was accepted within an 'OnIdle' handler.");
+                }
+
                 if (_inputAccepted)
                 {
-                    var commandLine = _buffer.ToString();
-                    MaybeAddToHistory(commandLine, _edits, _undoEditIndex);
+                    _acceptedCommandLine = _buffer.ToString();
+                    MaybeAddToHistory(_acceptedCommandLine, _edits, _undoEditIndex);
 
-                    _prediction.ActiveView.OnCommandLineAccepted(commandLine);
-                    return commandLine;
+                    _prediction.OnCommandLineAccepted(_acceptedCommandLine);
+                    return _acceptedCommandLine;
                 }
 
                 if (killCommandCount == _killCommandCount)
@@ -555,6 +635,7 @@ namespace Microsoft.PowerShell
                         // nor a "move to line" command. In that case, the desired column
                         // number will be computed from the current position on the logical line.
 
+                        _moveToEndOfLineCommandCount = 0;
                         _moveToLineDesiredColumn = -1;
                     }
                 }
@@ -630,7 +711,8 @@ namespace Microsoft.PowerShell
         static PSConsoleReadLine()
         {
             _singleton = new PSConsoleReadLine();
-            _clipboard = new ViRegister(_singleton);
+            _viRegister = new ViRegister(_singleton);
+            InitializePropertyInfo();
         }
 
         private PSConsoleReadLine()
@@ -646,10 +728,6 @@ namespace Microsoft.PowerShell
             _savedCurrentLine = new HistoryItem();
             _queuedKeys = new Queue<PSKeyInfo>();
 
-            // Initialize this event handler early because it could be used by PowerShell
-            // Editor Services before 'DelayedOneTimeInitialize' runs.
-            _forceEventWaitHandle = new AutoResetEvent(false);
-
             string hostName = null;
             // This works mostly by luck - we're not doing anything to guarantee the constructor for our
             // singleton is called on a thread with a runspace, but it is happening by coincidence.
@@ -657,7 +735,7 @@ namespace Microsoft.PowerShell
             {
                 try
                 {
-                    var results = ps.AddScript("$Host", useLocalScope: true).Invoke<PSHost>();
+                    var results = ps.AddScript("[System.Diagnostics.DebuggerHidden()]param() $Host", useLocalScope: true).Invoke<PSHost>();
                     PSHost host = results.Count == 1 ? results[0] : null;
                     hostName = host?.Name;
                 }
@@ -665,11 +743,9 @@ namespace Microsoft.PowerShell
                 {
                 }
             }
-            if (hostName == null)
-            {
-                hostName = "PSReadLine";
-            }
-            _options = new PSConsoleReadLineOptions(hostName);
+
+            bool usingLegacyConsole = _console is PlatformWindows.LegacyWin32Console;
+            _options = new PSConsoleReadLineOptions(hostName ?? DefaultName, usingLegacyConsole);
             _prediction = new Prediction(this);
             SetDefaultBindings(_options.EditMode);
         }
@@ -679,16 +755,22 @@ namespace Microsoft.PowerShell
             _engineIntrinsics = engineIntrinsics;
             _runspace = runspace;
 
+            // The directory separator to be used for tab completion may change depending on
+            // whether we are working with a remote Runspace.
+            // So, we always set it to null for every call into 'PSConsoleReadLine.ReadLine',
+            // and do the real initialization when tab completion is triggered for the first
+            // time during that call.
+            _directorySeparator = null;
+
+            // Update the client instance per every call to PSReadLine.
+            UpdatePredictionClient(runspace, engineIntrinsics);
+
             if (!_delayedOneTimeInitCompleted)
             {
                 DelayedOneTimeInitialize();
                 _delayedOneTimeInitCompleted = true;
             }
 
-            _previousRender = _initialPrevRender;
-            _previousRender.bufferWidth = _console.BufferWidth;
-            _previousRender.bufferHeight = _console.BufferHeight;
-            _previousRender.errorPrompt = false;
             _buffer.Clear();
             _edits = new List<EditItem>();
             _undoEditIndex = 0;
@@ -697,6 +779,7 @@ namespace Microsoft.PowerShell
             _mark = 0;
             _emphasisStart = -1;
             _emphasisLength = 0;
+            _ast = null;
             _tokens = null;
             _parseErrors = null;
             _inputAccepted = false;
@@ -704,6 +787,9 @@ namespace Microsoft.PowerShell
             _initialY = _console.CursorTop;
             _initialForeground = _console.ForegroundColor;
             _initialBackground = _console.BackgroundColor;
+            _previousRender = _initialPrevRender;
+            _previousRender.UpdateConsoleInfo(_console);
+            _previousRender.initialY = _initialY;
             _statusIsErrorMessage = false;
 
             _initialOutputEncoding = _console.OutputEncoding;
@@ -758,7 +844,7 @@ namespace Microsoft.PowerShell
         private void DelayedOneTimeInitialize()
         {
             // Delayed initialization is needed so that options can be set
-            // after the constuctor but have an affect before the user starts
+            // after the constructor but have an affect before the user starts
             // editing their first command line.  For example, if the user
             // specifies a custom history save file, we don't want to try reading
             // from the default one.
@@ -837,11 +923,11 @@ namespace Microsoft.PowerShell
             _killIndex = -1; // So first add indexes 0.
             _killRing = new List<string>(Options.MaximumKillRingCount);
 
-            _singleton._readKeyWaitHandle = new AutoResetEvent(false);
-            _singleton._keyReadWaitHandle = new AutoResetEvent(false);
-            _singleton._closingWaitHandle = new ManualResetEvent(false);
-            _singleton._requestKeyWaitHandles = new WaitHandle[] {_singleton._keyReadWaitHandle, _singleton._closingWaitHandle, _defaultCancellationToken.WaitHandle, _singleton._forceEventWaitHandle};
-            _singleton._threadProcWaitHandles = new WaitHandle[] {_singleton._readKeyWaitHandle, _singleton._closingWaitHandle};
+            _readKeyWaitHandle = new AutoResetEvent(false);
+            _keyReadWaitHandle = new AutoResetEvent(false);
+            _closingWaitHandle = new ManualResetEvent(false);
+            _requestKeyWaitHandles = new WaitHandle[] {_keyReadWaitHandle, _closingWaitHandle};
+            _threadProcWaitHandles = new WaitHandle[] {_readKeyWaitHandle, _closingWaitHandle};
 
             // This is for a "being hosted in an alternate appdomain scenario" (the
             // DomainUnload event is not raised for the default appdomain). It allows us
@@ -851,24 +937,13 @@ namespace Microsoft.PowerShell
             {
                 AppDomain.CurrentDomain.DomainUnload += (x, y) =>
                 {
-                    _singleton._closingWaitHandle.Set();
-                    _singleton._readKeyThread.Join(); // may need to wait for history to be written
+                    _closingWaitHandle.Set();
+                    _readKeyThread.Join(); // may need to wait for history to be written
                 };
             }
 
-            _singleton._readKeyThread = new Thread(_singleton.ReadKeyThreadProc) {IsBackground = true, Name = "PSReadLine ReadKey Thread"};
-            _singleton._readKeyThread.Start();
-        }
-
-        /// <summary>
-        /// Used by PowerShellEditorServices to force immediate
-        /// event handling during the <see cref="PSConsoleReadLine.ReadKey" />
-        /// method. This is not a public API, but it is part of a private contract
-        /// with that project.
-        /// </summary>
-        private static void ForcePSEventHandling()
-        {
-            _singleton._forceEventWaitHandle.Set();
+            _readKeyThread = new Thread(ReadKeyThreadProc) {IsBackground = true, Name = "PSReadLine ReadKey Thread"};
+            _readKeyThread.Start();
         }
 
         private static void Chord(ConsoleKeyInfo? key = null, object arg = null)
@@ -991,16 +1066,28 @@ namespace Microsoft.PowerShell
         public static void InvokePrompt(ConsoleKeyInfo? key = null, object arg = null)
         {
             var console = _singleton._console;
-            console.CursorVisible = false;
 
             if (arg is int newY)
             {
+                if (newY < 0 || newY >= console.BufferHeight)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(arg));
+                }
+
+                console.CursorVisible = false;
                 console.SetCursorPosition(0, newY);
             }
             else
             {
                 newY = _singleton._initialY - _singleton._options.ExtraPromptLineCount;
 
+                // Silently return if user has implicitly requested an impossible prompt invocation.
+                if (newY < 0)
+                {
+                    return;
+                }
+
+                console.CursorVisible = false;
                 console.SetCursorPosition(0, newY);
 
                 // We need to rewrite the prompt, so blank out everything from a previous prompt invocation
@@ -1020,6 +1107,8 @@ namespace Microsoft.PowerShell
             _singleton._initialX = console.CursorLeft;
             _singleton._initialY = console.CursorTop;
             _singleton._previousRender = _initialPrevRender;
+            _singleton._previousRender.UpdateConsoleInfo(console);
+            _singleton._previousRender.initialY = _singleton._initialY;
 
             _singleton.Render();
             console.CursorVisible = true;
@@ -1094,7 +1183,9 @@ namespace Microsoft.PowerShell
 
         internal static bool IsRunningCI(IConsole console)
         {
-            return console.GetType().FullName == "Test.TestConsole";
+            Type consoleType = console.GetType();
+            return consoleType.FullName == "Test.TestConsole"
+                || consoleType.BaseType.FullName == "Test.TestConsole";
         }
     }
 }

@@ -3,6 +3,7 @@ Copyright (c) Microsoft Corporation.  All rights reserved.
 --********************************************************************/
 
 using System;
+using System.Text;
 
 namespace Microsoft.PowerShell
 {
@@ -45,12 +46,12 @@ namespace Microsoft.PowerShell
                 : new string(' ', cnt);
         }
 
-        private static int LengthInBufferCells(string str)
+        internal static int LengthInBufferCells(string str)
         {
             return LengthInBufferCells(str, 0, str.Length);
         }
 
-        private static int LengthInBufferCells(string str, int start, int end)
+        internal static int LengthInBufferCells(string str, int start, int end)
         {
             var sum = 0;
             for (var i = start; i < end; i++)
@@ -70,7 +71,27 @@ namespace Microsoft.PowerShell
             return sum;
         }
 
-        private static int LengthInBufferCells(char c)
+        internal static int LengthInBufferCells(StringBuilder sb, int start, int end)
+        {
+            var sum = 0;
+            for (var i = start; i < end; i++)
+            {
+                var c = sb[i];
+                if (c == 0x1b && (i + 1) < end && sb[i + 1] == '[')
+                {
+                    // Simple escape sequence skipping
+                    i += 2;
+                    while (i < end && sb[i] != 'm')
+                        i++;
+
+                    continue;
+                }
+                sum += LengthInBufferCells(c);
+            }
+            return sum;
+        }
+
+        internal static int LengthInBufferCells(char c)
         {
             if (c < 256)
             {
@@ -93,7 +114,7 @@ namespace Microsoft.PowerShell
                     (c >= 0xff00 && c <= 0xff60) || /* Fullwidth Forms */
                     (c >= 0xffe0 && c <= 0xffe6));
                     // We can ignore these ranges because .Net strings use surrogate pairs
-                    // for this range and we do not handle surrogage pairs.
+                    // for this range and we do not handle surrogate pairs.
                     // (c >= 0x20000 && c <= 0x2fffd) ||
                     // (c >= 0x30000 && c <= 0x3fffd)
             return 1 + (isWide ? 1 : 0);
@@ -122,16 +143,22 @@ namespace Microsoft.PowerShell
 
             for (int i = start; i < text.Length; i++)
             {
-                if (cellLength >= countOfCells)
+                cellLength += LengthInBufferCells(text[i]);
+
+                if (cellLength > countOfCells)
                 {
                     return charLength;
                 }
 
-                cellLength += LengthInBufferCells(text[i]);
                 charLength++;
+
+                if (cellLength == countOfCells)
+                {
+                    return charLength;
+                }
             }
 
-            return 0;
+            return charLength;
         }
 
         private static int SubstringLengthByCellsFromEnd(string text, int countOfCells)
@@ -146,16 +173,47 @@ namespace Microsoft.PowerShell
 
             for (int i = start; i >= 0; i--)
             {
-                if (cellLength >= countOfCells)
+                cellLength += LengthInBufferCells(text[i]);
+
+                if (cellLength > countOfCells)
                 {
                     return charLength;
                 }
 
-                cellLength += LengthInBufferCells(text[i]);
                 charLength++;
+
+                if (cellLength == countOfCells)
+                {
+                    return charLength;
+                }
             }
 
-            return 0;
+            return charLength;
+        }
+
+        private static (int newStart, int newEnd) TrimSubstringInPlace(string text, int start, int end)
+        {
+            int newStart = start;
+            int newEnd = end;
+
+            for (; newStart <= end; newStart++)
+            {
+                if (!char.IsWhiteSpace(text[newStart]))
+                {
+                    break;
+                }
+            }
+
+            for (; newEnd > newStart; newEnd--)
+            {
+                if (!char.IsWhiteSpace(text[newEnd]))
+                {
+                    break;
+                }
+            }
+
+            // Return the new start/end after triming, or (-1, -1) if the substring only consists of whitespaces.
+            return newStart > newEnd ? (-1, -1) : (newStart, newEnd);
         }
     }
 }

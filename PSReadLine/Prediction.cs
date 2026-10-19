@@ -4,10 +4,12 @@ Copyright (c) Microsoft Corporation.  All rights reserved.
 
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using System.Threading.Tasks;
 using System.Management.Automation;
+using System.Management.Automation.Runspaces;
 using System.Management.Automation.Language;
-using System.Management.Automation.Subsystem;
+using System.Management.Automation.Subsystem.Prediction;
 using System.Diagnostics.CodeAnalysis;
 using Microsoft.PowerShell.Internal;
 using Microsoft.PowerShell.PSReadLine;
@@ -16,26 +18,86 @@ namespace Microsoft.PowerShell
 {
     public partial class PSConsoleReadLine
     {
+        private const string DefaultName = "PSReadLine";
+        private static readonly PredictionClient s_predictionClient = new(DefaultName, PredictionClientKind.Terminal);
+        private static PropertyInfo s_pCurrentLocation = null;
+
+        /// <summary>
+        /// Initialize the <see cref="PropertyInfo"/> objects for those public settable properties newly added to
+        /// <see cref="PredictionClient"/>.
+        /// </summary>
+        private static void InitializePropertyInfo()
+        {
+            Version ver = typeof(PSObject).Assembly.GetName().Version;
+            if (ver.Major < 7 || ver.Minor < 4)
+            {
+                return;
+            }
+
+            Type pcType = typeof(PredictionClient);
+            // Property added in 7.4
+            s_pCurrentLocation = pcType.GetProperty("CurrentLocation");
+        }
+
+        /// <summary>
+        /// New public settable properties may be added to the <see cref="PredictionClient"/> type as it evolves to
+        /// offer more helpful context information. We dynamically set those properties here to avoid any backward
+        /// compatibility issues.
+        /// </summary>
+        private static void UpdatePredictionClient(Runspace runspace, EngineIntrinsics engineIntrinsics)
+        {
+            // Set the current location if the 'CurrentLocation' property exists.
+            if (s_pCurrentLocation is not null)
+            {
+                // Set the current location if it's a local Runspace. Otherwise, set it to null.
+                object path = runspace is null || runspace.RunspaceIsRemote
+                    ? null
+                    : engineIntrinsics?.SessionState.Path.CurrentLocation;
+                s_pCurrentLocation.SetValue(s_predictionClient, path);
+            }
+        }
+
         // Stub helper methods so prediction can be mocked
         [ExcludeFromCodeCoverage]
-        Task<List<PredictionResult>> IPSConsoleReadLineMockableMethods.PredictInput(Ast ast, Token[] tokens)
+        Task<List<PredictionResult>> IPSConsoleReadLineMockableMethods.PredictInputAsync(Ast ast, Token[] tokens)
         {
-            return CommandPrediction.PredictInput(ast, tokens);
+            return CommandPrediction.PredictInputAsync(s_predictionClient, ast, tokens);
+        }
+
+        [ExcludeFromCodeCoverage]
+        void IPSConsoleReadLineMockableMethods.OnSuggestionDisplayed(Guid predictorId, uint session, int countOrIndex)
+        {
+            CommandPrediction.OnSuggestionDisplayed(s_predictionClient, predictorId, session, countOrIndex);
+        }
+
+        [ExcludeFromCodeCoverage]
+        void IPSConsoleReadLineMockableMethods.OnSuggestionAccepted(Guid predictorId, uint session, string suggestionText)
+        {
+            CommandPrediction.OnSuggestionAccepted(s_predictionClient, predictorId, session, suggestionText);
         }
 
         [ExcludeFromCodeCoverage]
         void IPSConsoleReadLineMockableMethods.OnCommandLineAccepted(IReadOnlyList<string> history)
         {
-            CommandPrediction.OnCommandLineAccepted(history);
+            CommandPrediction.OnCommandLineAccepted(s_predictionClient, history);
         }
 
         [ExcludeFromCodeCoverage]
-        void IPSConsoleReadLineMockableMethods.OnSuggestionAccepted(Guid predictorId, string suggestionText)
+        void IPSConsoleReadLineMockableMethods.OnCommandLineExecuted(string commandLine, bool success)
         {
-            CommandPrediction.OnSuggestionAccepted(predictorId, suggestionText);
+            CommandPrediction.OnCommandLineExecuted(s_predictionClient, commandLine, success);
         }
 
         private readonly Prediction _prediction;
+
+        /// <summary>
+        /// Report the execution result (success or failure) of the last accepted command line.
+        /// </summary>
+        /// <param name="success">Whether the execution was successful.</param>
+        private void ReportExecutionStatus(bool success)
+        {
+            _prediction.OnCommandLineExecuted(_acceptedCommandLine, success);
+        }
 
         /// <summary>
         /// Accept the suggestion text if there is one.
@@ -51,7 +113,9 @@ namespace Microsoft.PowerShell
                 inlineView.OnSuggestionAccepted();
 
                 using var _ = prediction.DisableScoped();
-                Replace(0, _singleton._buffer.Length, inlineView.SuggestionText);
+
+                _singleton._current = _singleton._buffer.Length;
+                Insert(inlineView.SuggestionText.Substring(_singleton._current));
             }
         }
 
@@ -81,14 +145,17 @@ namespace Microsoft.PowerShell
                 // Ignore the visual selection.
                 _singleton._visualSelectionCommandCount = 0;
 
-                int index = _singleton._buffer.Length;
+                int start = _singleton._buffer.Length;
+                int index = start;
                 while (numericArg-- > 0 && index < inlineView.SuggestionText.Length)
                 {
                     index = inlineView.FindForwardSuggestionWordPoint(index, _singleton.Options.WordDelimiters);
                 }
 
                 inlineView.OnSuggestionAccepted();
-                Replace(0, _singleton._buffer.Length, inlineView.SuggestionText.Substring(0, index));
+
+                _singleton._current = start;
+                Insert(inlineView.SuggestionText.Substring(start, index - start));
             }
         }
 
@@ -116,6 +183,21 @@ namespace Microsoft.PowerShell
         }
 
         /// <summary>
+        /// Show the tooltip of the currently selected list item in the full view.
+        /// </summary>
+        public static void ShowFullPredictionTooltip(ConsoleKeyInfo? key = null, object arg = null)
+        {
+            if (_singleton._prediction.ActiveView is PredictionListView listView && listView.HasActiveSuggestion)
+            {
+                string tooltip = listView.SelectedItemTooltip;
+                if (!string.IsNullOrWhiteSpace(tooltip))
+                {
+                    _singleton._mockableMethods.RenderFullHelp(tooltip, regexPatternToScrollTo: null);
+                }
+            }
+        }
+
+        /// <summary>
         /// Implementation for updating the selected item in list view.
         /// </summary>
         private static bool UpdateListSelection(int numericArg)
@@ -127,6 +209,42 @@ namespace Microsoft.PowerShell
 
                 listView.UpdateListSelection(move: numericArg);
                 ReplaceSelection(listView.SelectedItemText);
+
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool UpdateListByPaging(bool pageUp, int numericArg)
+        {
+            if (_singleton._prediction.ActiveView is PredictionListView listView && listView.HasActiveSuggestion)
+            {
+                // Ignore the visual selection.
+                _singleton._visualSelectionCommandCount = 0;
+
+                if (listView.UpdateListByPaging(pageUp, numericArg))
+                {
+                    ReplaceSelection(listView.SelectedItemText);
+                }
+
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool UpdateListByLoopingSources(bool jumpUp, int numericArg)
+        {
+            if (_singleton._prediction.ActiveView is PredictionListView listView && listView.HasActiveSuggestion)
+            {
+                // Ignore the visual selection.
+                _singleton._visualSelectionCommandCount = 0;
+
+                if (listView.UpdateListByLoopingSources(jumpUp, numericArg))
+                {
+                    ReplaceSelection(listView.SelectedItemText);
+                }
 
                 return true;
             }
@@ -372,6 +490,28 @@ namespace Microsoft.PowerShell
                 }
 
                 return retValue;
+            }
+
+            /// <summary>
+            /// Get called when a command line is accepted.
+            /// </summary>
+            internal void OnCommandLineAccepted(string commandLine)
+            {
+                if (ActiveView.UsePlugin && !string.IsNullOrWhiteSpace(commandLine))
+                {
+                    _singleton._mockableMethods.OnCommandLineAccepted(_singleton._recentHistory.ToArray());
+                }
+            }
+
+            /// <summary>
+            /// Get called when the last accepted command line finished execution.
+            /// </summary>
+            internal void OnCommandLineExecuted(string commandLine, bool success)
+            {
+                if (ActiveView.UsePlugin && !string.IsNullOrWhiteSpace(commandLine))
+                {
+                    _singleton._mockableMethods.OnCommandLineExecuted(commandLine, success);
+                }
             }
         }
     }

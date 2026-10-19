@@ -26,6 +26,8 @@ namespace Microsoft.PowerShell
         History,
         /// <summary>Completion functions</summary>
         Completion,
+        /// <summary>Prediction functions</summary>
+        Prediction,
         /// <summary>Miscellaneous functions</summary>
         Miscellaneous,
         /// <summary>Selection functions</summary>
@@ -89,6 +91,8 @@ namespace Microsoft.PowerShell
                 return PSReadLineResources.HistoryGrouping;
             case KeyHandlerGroup.Completion:
                 return PSReadLineResources.CompletionGrouping;
+            case KeyHandlerGroup.Prediction:
+                return PSReadLineResources.PredictionGrouping;
             case KeyHandlerGroup.Miscellaneous:
                 return PSReadLineResources.MiscellaneousGrouping;
             case KeyHandlerGroup.Selection:
@@ -209,7 +213,7 @@ namespace Microsoft.PowerShell
                 { Keys.CtrlY,                  MakeKeyHandler(Redo,                      "Redo") },
                 { Keys.CtrlZ,                  MakeKeyHandler(Undo,                      "Undo") },
                 { Keys.CtrlBackspace,          MakeKeyHandler(BackwardKillWord,          "BackwardKillWord") },
-                { Keys.CtrlHome,               MakeKeyHandler(BackwardDeleteLine,        "BackwardDeleteLine") },
+                { Keys.CtrlHome,               MakeKeyHandler(BackwardDeleteInput,       "BackwardDeleteInput") },
                 { Keys.CtrlRBracket,           MakeKeyHandler(GotoBrace,                 "GotoBrace") },
                 { Keys.CtrlAltQuestion,        MakeKeyHandler(ShowKeyBindings,           "ShowKeyBindings") },
                 { Keys.AltPeriod,              MakeKeyHandler(YankLastArg,               "YankLastArg") },
@@ -225,9 +229,13 @@ namespace Microsoft.PowerShell
                 { Keys.Alt9,                   MakeKeyHandler(DigitArgument,             "DigitArgument") },
                 { Keys.AltMinus,               MakeKeyHandler(DigitArgument,             "DigitArgument") },
                 { Keys.AltQuestion,            MakeKeyHandler(WhatIsKey,                 "WhatIsKey") },
+                { Keys.AltA,                   MakeKeyHandler(SelectCommandArgument,     "SelectCommandArgument") },
+                { Keys.AltH,                   MakeKeyHandler(ShowParameterHelp,         "ShowParameterHelp") },
+                { Keys.F1,                     MakeKeyHandler(ShowCommandHelp,           "ShowCommandHelp") },
                 { Keys.F2,                     MakeKeyHandler(SwitchPredictionView,      "SwitchPredictionView") },
                 { Keys.F3,                     MakeKeyHandler(CharacterSearch,           "CharacterSearch") },
                 { Keys.ShiftF3,                MakeKeyHandler(CharacterSearchBackward,   "CharacterSearchBackward") },
+                { Keys.F4,                     MakeKeyHandler(ShowFullPredictionTooltip, "ShowFullPredictionTooltip") },
                 { Keys.F8,                     MakeKeyHandler(HistorySearchBackward,     "HistorySearchBackward") },
                 { Keys.ShiftF8,                MakeKeyHandler(HistorySearchForward,      "HistorySearchForward") },
                 // Added for xtermjs-based terminals that send different key combinations.
@@ -242,7 +250,7 @@ namespace Microsoft.PowerShell
                 _dispatchTable.Add(Keys.CtrlSpace,  MakeKeyHandler(MenuComplete,      "MenuComplete"));
                 _dispatchTable.Add(Keys.AltF7,      MakeKeyHandler(ClearHistory,      "ClearHistory"));
                 _dispatchTable.Add(Keys.CtrlDelete, MakeKeyHandler(KillWord,          "KillWord"));
-                _dispatchTable.Add(Keys.CtrlEnd,    MakeKeyHandler(ForwardDeleteLine, "ForwardDeleteLine"));
+                _dispatchTable.Add(Keys.CtrlEnd,    MakeKeyHandler(ForwardDeleteInput, "ForwardDeleteInput"));
                 _dispatchTable.Add(Keys.CtrlH,      MakeKeyHandler(BackwardDeleteChar,"BackwardDeleteChar"));
 
                 // PageUp/PageDown and CtrlPageUp/CtrlPageDown bindings are supported on Windows only because they depend on the
@@ -260,74 +268,82 @@ namespace Microsoft.PowerShell
         {
             _dispatchTable = new Dictionary<PSKeyInfo, KeyHandler>
             {
-                { Keys.Backspace,       MakeKeyHandler(BackwardDeleteChar,   "BackwardDeleteChar") },
-                { Keys.Enter,           MakeKeyHandler(AcceptLine,           "AcceptLine") },
-                { Keys.ShiftEnter,      MakeKeyHandler(AddLine,              "AddLine") },
-                { Keys.LeftArrow,       MakeKeyHandler(BackwardChar,         "BackwardChar") },
-                { Keys.RightArrow,      MakeKeyHandler(ForwardChar,          "ForwardChar") },
-                { Keys.ShiftLeftArrow,  MakeKeyHandler(SelectBackwardChar,   "SelectBackwardChar") },
-                { Keys.ShiftRightArrow, MakeKeyHandler(SelectForwardChar,    "SelectForwardChar") },
-                { Keys.UpArrow,         MakeKeyHandler(PreviousHistory,      "PreviousHistory") },
-                { Keys.DownArrow,       MakeKeyHandler(NextHistory,          "NextHistory") },
-                { Keys.AltLess,         MakeKeyHandler(BeginningOfHistory,   "BeginningOfHistory") },
-                { Keys.AltGreater,      MakeKeyHandler(EndOfHistory,         "EndOfHistory") },
-                { Keys.Home,            MakeKeyHandler(BeginningOfLine,      "BeginningOfLine") },
-                { Keys.End,             MakeKeyHandler(EndOfLine,            "EndOfLine") },
-                { Keys.ShiftHome,       MakeKeyHandler(SelectBackwardsLine,  "SelectBackwardsLine") },
-                { Keys.ShiftEnd,        MakeKeyHandler(SelectLine,           "SelectLine") },
-                { Keys.Escape,          MakeKeyHandler(Chord,                "ChordFirstKey") },
-                { Keys.Delete,          MakeKeyHandler(DeleteChar,           "DeleteChar") },
-                { Keys.Tab,             MakeKeyHandler(Complete,             "Complete") },
-                { Keys.CtrlA,           MakeKeyHandler(BeginningOfLine,      "BeginningOfLine") },
-                { Keys.CtrlB,           MakeKeyHandler(BackwardChar,         "BackwardChar") },
-                { Keys.CtrlC,           MakeKeyHandler(CopyOrCancelLine,     "CopyOrCancelLine") },
-                { Keys.CtrlD,           MakeKeyHandler(DeleteCharOrExit,     "DeleteCharOrExit") },
-                { Keys.CtrlE,           MakeKeyHandler(EndOfLine,            "EndOfLine") },
-                { Keys.CtrlF,           MakeKeyHandler(ForwardChar,          "ForwardChar") },
-                { Keys.CtrlG,           MakeKeyHandler(Abort,                "Abort") },
-                { Keys.CtrlL,           MakeKeyHandler(ClearScreen,          "ClearScreen") },
-                { Keys.CtrlK,           MakeKeyHandler(KillLine,             "KillLine") },
-                { Keys.CtrlM,           MakeKeyHandler(ValidateAndAcceptLine,"ValidateAndAcceptLine") },
-                { Keys.CtrlN,           MakeKeyHandler(NextHistory,          "NextHistory") },
-                { Keys.CtrlO,           MakeKeyHandler(AcceptAndGetNext,     "AcceptAndGetNext") },
-                { Keys.CtrlP,           MakeKeyHandler(PreviousHistory,      "PreviousHistory") },
-                { Keys.CtrlR,           MakeKeyHandler(ReverseSearchHistory, "ReverseSearchHistory") },
-                { Keys.CtrlS,           MakeKeyHandler(ForwardSearchHistory, "ForwardSearchHistory") },
-                { Keys.CtrlT,           MakeKeyHandler(SwapCharacters,       "SwapCharacters") },
-                { Keys.CtrlU,           MakeKeyHandler(BackwardKillLine,     "BackwardKillLine") },
-                { Keys.CtrlX,           MakeKeyHandler(Chord,                "ChordFirstKey") },
-                { Keys.CtrlW,           MakeKeyHandler(UnixWordRubout,       "UnixWordRubout") },
-                { Keys.CtrlY,           MakeKeyHandler(Yank,                 "Yank") },
-                { Keys.CtrlAt,          MakeKeyHandler(SetMark,              "SetMark") },
-                { Keys.CtrlBackspace,   MakeKeyHandler(BackwardDeleteChar,   "BackwardDeleteChar") },
-                { Keys.CtrlUnderbar,    MakeKeyHandler(Undo,                 "Undo") },
-                { Keys.CtrlRBracket,    MakeKeyHandler(CharacterSearch,      "CharacterSearch") },
-                { Keys.CtrlAltRBracket, MakeKeyHandler(CharacterSearchBackward,"CharacterSearchBackward") },
-                { Keys.Alt0,            MakeKeyHandler(DigitArgument,        "DigitArgument") },
-                { Keys.Alt1,            MakeKeyHandler(DigitArgument,        "DigitArgument") },
-                { Keys.Alt2,            MakeKeyHandler(DigitArgument,        "DigitArgument") },
-                { Keys.Alt3,            MakeKeyHandler(DigitArgument,        "DigitArgument") },
-                { Keys.Alt4,            MakeKeyHandler(DigitArgument,        "DigitArgument") },
-                { Keys.Alt5,            MakeKeyHandler(DigitArgument,        "DigitArgument") },
-                { Keys.Alt6,            MakeKeyHandler(DigitArgument,        "DigitArgument") },
-                { Keys.Alt7,            MakeKeyHandler(DigitArgument,        "DigitArgument") },
-                { Keys.Alt8,            MakeKeyHandler(DigitArgument,        "DigitArgument") },
-                { Keys.Alt9,            MakeKeyHandler(DigitArgument,        "DigitArgument") },
-                { Keys.AltMinus,        MakeKeyHandler(DigitArgument,        "DigitArgument") },
-                { Keys.AltB,            MakeKeyHandler(BackwardWord,         "BackwardWord") },
-                { Keys.AltShiftB,       MakeKeyHandler(SelectBackwardWord,   "SelectBackwardWord") },
-                { Keys.AltD,            MakeKeyHandler(KillWord,             "KillWord") },
-                { Keys.AltF,            MakeKeyHandler(ForwardWord,          "ForwardWord") },
-                { Keys.AltShiftF,       MakeKeyHandler(SelectForwardWord,    "SelectForwardWord") },
-                { Keys.AltR,            MakeKeyHandler(RevertLine,           "RevertLine") },
-                { Keys.AltY,            MakeKeyHandler(YankPop,              "YankPop") },
-                { Keys.AltBackspace,    MakeKeyHandler(BackwardKillWord,     "BackwardKillWord") },
-                { Keys.AltEquals,       MakeKeyHandler(PossibleCompletions,  "PossibleCompletions") },
-                { Keys.CtrlAltQuestion, MakeKeyHandler(ShowKeyBindings,      "ShowKeyBindings") },
-                { Keys.AltQuestion,     MakeKeyHandler(WhatIsKey,            "WhatIsKey") },
-                { Keys.AltPeriod,       MakeKeyHandler(YankLastArg,          "YankLastArg") },
-                { Keys.AltUnderbar,     MakeKeyHandler(YankLastArg,          "YankLastArg") },
-                { Keys.CtrlAltY,        MakeKeyHandler(YankNthArg,           "YankNthArg") },
+                { Keys.Backspace,              MakeKeyHandler(BackwardDeleteChar,        "BackwardDeleteChar") },
+                { Keys.Enter,                  MakeKeyHandler(AcceptLine,                "AcceptLine") },
+                { Keys.ShiftEnter,             MakeKeyHandler(AddLine,                   "AddLine") },
+                { Keys.LeftArrow,              MakeKeyHandler(BackwardChar,              "BackwardChar") },
+                { Keys.RightArrow,             MakeKeyHandler(ForwardChar,               "ForwardChar") },
+                { Keys.ShiftLeftArrow,         MakeKeyHandler(SelectBackwardChar,        "SelectBackwardChar") },
+                { Keys.ShiftRightArrow,        MakeKeyHandler(SelectForwardChar,         "SelectForwardChar") },
+                { Keys.UpArrow,                MakeKeyHandler(PreviousHistory,           "PreviousHistory") },
+                { Keys.DownArrow,              MakeKeyHandler(NextHistory,               "NextHistory") },
+                { Keys.AltLess,                MakeKeyHandler(BeginningOfHistory,        "BeginningOfHistory") },
+                { Keys.AltGreater,             MakeKeyHandler(EndOfHistory,              "EndOfHistory") },
+                { Keys.Home,                   MakeKeyHandler(BeginningOfLine,           "BeginningOfLine") },
+                { Keys.End,                    MakeKeyHandler(EndOfLine,                 "EndOfLine") },
+                { Keys.ShiftHome,              MakeKeyHandler(SelectBackwardsLine,       "SelectBackwardsLine") },
+                { Keys.ShiftEnd,               MakeKeyHandler(SelectLine,                "SelectLine") },
+                { Keys.Escape,                 MakeKeyHandler(Chord,                     "ChordFirstKey") },
+                { Keys.Delete,                 MakeKeyHandler(DeleteChar,                "DeleteChar") },
+                { Keys.Tab,                    MakeKeyHandler(Complete,                  "Complete") },
+                { Keys.CtrlA,                  MakeKeyHandler(BeginningOfLine,           "BeginningOfLine") },
+                { Keys.CtrlB,                  MakeKeyHandler(BackwardChar,              "BackwardChar") },
+                { Keys.CtrlC,                  MakeKeyHandler(CopyOrCancelLine,          "CopyOrCancelLine") },
+                { Keys.CtrlD,                  MakeKeyHandler(DeleteCharOrExit,          "DeleteCharOrExit") },
+                { Keys.CtrlE,                  MakeKeyHandler(EndOfLine,                 "EndOfLine") },
+                { Keys.CtrlF,                  MakeKeyHandler(ForwardChar,               "ForwardChar") },
+                { Keys.CtrlG,                  MakeKeyHandler(Abort,                     "Abort") },
+                { Keys.CtrlL,                  MakeKeyHandler(ClearScreen,               "ClearScreen") },
+                { Keys.CtrlK,                  MakeKeyHandler(KillLine,                  "KillLine") },
+                { Keys.CtrlM,                  MakeKeyHandler(ValidateAndAcceptLine,     "ValidateAndAcceptLine") },
+                { Keys.CtrlN,                  MakeKeyHandler(NextHistory,               "NextHistory") },
+                { Keys.CtrlO,                  MakeKeyHandler(AcceptAndGetNext,          "AcceptAndGetNext") },
+                { Keys.CtrlP,                  MakeKeyHandler(PreviousHistory,           "PreviousHistory") },
+                { Keys.CtrlR,                  MakeKeyHandler(ReverseSearchHistory,      "ReverseSearchHistory") },
+                { Keys.CtrlS,                  MakeKeyHandler(ForwardSearchHistory,      "ForwardSearchHistory") },
+                { Keys.CtrlT,                  MakeKeyHandler(SwapCharacters,            "SwapCharacters") },
+                { Keys.CtrlU,                  MakeKeyHandler(BackwardKillInput,         "BackwardKillInput") },
+                { Keys.CtrlX,                  MakeKeyHandler(Chord,                     "ChordFirstKey") },
+                { Keys.CtrlW,                  MakeKeyHandler(UnixWordRubout,            "UnixWordRubout") },
+                { Keys.CtrlY,                  MakeKeyHandler(Yank,                      "Yank") },
+                { Keys.CtrlAt,                 MakeKeyHandler(SetMark,                   "SetMark") },
+                { Keys.CtrlBackspace,          MakeKeyHandler(BackwardDeleteChar,        "BackwardDeleteChar") },
+                { Keys.CtrlUnderbar,           MakeKeyHandler(Undo,                      "Undo") },
+                { Keys.CtrlRBracket,           MakeKeyHandler(CharacterSearch,           "CharacterSearch") },
+                { Keys.CtrlAltRBracket,        MakeKeyHandler(CharacterSearchBackward,   "CharacterSearchBackward") },
+                { Keys.Alt0,                   MakeKeyHandler(DigitArgument,             "DigitArgument") },
+                { Keys.Alt1,                   MakeKeyHandler(DigitArgument,             "DigitArgument") },
+                { Keys.Alt2,                   MakeKeyHandler(DigitArgument,             "DigitArgument") },
+                { Keys.Alt3,                   MakeKeyHandler(DigitArgument,             "DigitArgument") },
+                { Keys.Alt4,                   MakeKeyHandler(DigitArgument,             "DigitArgument") },
+                { Keys.Alt5,                   MakeKeyHandler(DigitArgument,             "DigitArgument") },
+                { Keys.Alt6,                   MakeKeyHandler(DigitArgument,             "DigitArgument") },
+                { Keys.Alt7,                   MakeKeyHandler(DigitArgument,             "DigitArgument") },
+                { Keys.Alt8,                   MakeKeyHandler(DigitArgument,             "DigitArgument") },
+                { Keys.Alt9,                   MakeKeyHandler(DigitArgument,             "DigitArgument") },
+                { Keys.AltMinus,               MakeKeyHandler(DigitArgument,             "DigitArgument") },
+                { Keys.AltB,                   MakeKeyHandler(BackwardWord,              "BackwardWord") },
+                { Keys.AltShiftB,              MakeKeyHandler(SelectBackwardWord,        "SelectBackwardWord") },
+                { Keys.AltD,                   MakeKeyHandler(KillWord,                  "KillWord") },
+                { Keys.AltF,                   MakeKeyHandler(ForwardWord,               "ForwardWord") },
+                { Keys.AltShiftF,              MakeKeyHandler(SelectForwardWord,         "SelectForwardWord") },
+                { Keys.AltR,                   MakeKeyHandler(RevertLine,                "RevertLine") },
+                { Keys.AltY,                   MakeKeyHandler(YankPop,                   "YankPop") },
+                { Keys.AltBackspace,           MakeKeyHandler(BackwardKillWord,          "BackwardKillWord") },
+                { Keys.AltEquals,              MakeKeyHandler(PossibleCompletions,       "PossibleCompletions") },
+                { Keys.CtrlAltQuestion,        MakeKeyHandler(ShowKeyBindings,           "ShowKeyBindings") },
+                { Keys.AltQuestion,            MakeKeyHandler(WhatIsKey,                 "WhatIsKey") },
+                { Keys.AltPeriod,              MakeKeyHandler(YankLastArg,               "YankLastArg") },
+                { Keys.AltUnderbar,            MakeKeyHandler(YankLastArg,               "YankLastArg") },
+                { Keys.CtrlAltY,               MakeKeyHandler(YankNthArg,                "YankNthArg") },
+                { Keys.AltA,                   MakeKeyHandler(SelectCommandArgument,     "SelectCommandArgument") },
+                { Keys.AltH,                   MakeKeyHandler(ShowParameterHelp,         "ShowParameterHelp") },
+                { Keys.F1,                     MakeKeyHandler(ShowCommandHelp,           "ShowCommandHelp") },
+                { Keys.F2,                     MakeKeyHandler(SwitchPredictionView,      "SwitchPredictionView") },
+                { Keys.F4,                     MakeKeyHandler(ShowFullPredictionTooltip, "ShowFullPredictionTooltip") },
+                { Keys.AltU,                   MakeKeyHandler(UpcaseWord,                "UpcaseWord") },
+                { Keys.AltL,                   MakeKeyHandler(DowncaseWord,              "DowncaseWord") },
+                { Keys.AltC,                   MakeKeyHandler(CapitalizeWord,            "CapitalizeWord") },
             };
 
             // Some bindings are not available on certain platforms
@@ -360,6 +376,9 @@ namespace Microsoft.PowerShell
                     { Keys.F,         MakeKeyHandler(ForwardWord,      "ForwardWord")},
                     { Keys.R,         MakeKeyHandler(RevertLine,       "RevertLine")},
                     { Keys.Y,         MakeKeyHandler(YankPop,          "YankPop")},
+                    { Keys.U,         MakeKeyHandler(UpcaseWord,       "UpcaseWord") },
+                    { Keys.L,         MakeKeyHandler(DowncaseWord,     "DowncaseWord") },
+                    { Keys.C,         MakeKeyHandler(CapitalizeWord,   "CapitalizeWord") },
                     { Keys.CtrlY,     MakeKeyHandler(YankNthArg,       "YankNthArg")},
                     { Keys.Backspace, MakeKeyHandler(BackwardKillWord, "BackwardKillWord")},
                     { Keys.Period,    MakeKeyHandler(YankLastArg,      "YankLastArg")},
@@ -369,7 +388,7 @@ namespace Microsoft.PowerShell
                 // Ctrl+X,<key> table
                 [Keys.CtrlX] = new Dictionary<PSKeyInfo, KeyHandler>
                 {
-                    { Keys.Backspace, MakeKeyHandler(BackwardKillLine,     "BackwardKillLine") },
+                    { Keys.Backspace, MakeKeyHandler(BackwardKillInput,    "BackwardKillInput") },
                     { Keys.CtrlE,     MakeKeyHandler(ViEditVisually,       "ViEditVisually") },
                     { Keys.CtrlU,     MakeKeyHandler(Undo,                 "Undo") },
                     { Keys.CtrlX,     MakeKeyHandler(ExchangePointAndMark, "ExchangePointAndMark") },
@@ -389,11 +408,14 @@ namespace Microsoft.PowerShell
             case nameof(AcceptLine):
             case nameof(AddLine):
             case nameof(BackwardDeleteChar):
+            case nameof(BackwardDeleteInput):
             case nameof(BackwardDeleteLine):
             case nameof(BackwardDeleteWord):
+            case nameof(BackwardKillInput):
             case nameof(BackwardKillLine):
             case nameof(BackwardKillWord):
             case nameof(CancelLine):
+            case nameof(CapitalizeWord):
             case nameof(Copy):
             case nameof(CopyOrCancelLine):
             case nameof(Cut):
@@ -401,13 +423,15 @@ namespace Microsoft.PowerShell
             case nameof(DeleteCharOrExit):
             case nameof(DeleteEndOfBuffer):
             case nameof(DeleteEndOfWord):
-            case nameof(DeleteRelativeLines):
             case nameof(DeleteLine):
             case nameof(DeleteLineToFirstChar):
             case nameof(DeleteNextLines):
             case nameof(DeletePreviousLines):
+            case nameof(DeleteRelativeLines):
             case nameof(DeleteToEnd):
             case nameof(DeleteWord):
+            case nameof(DowncaseWord):
+            case nameof(ForwardDeleteInput):
             case nameof(ForwardDeleteLine):
             case nameof(InsertLineAbove):
             case nameof(InsertLineBelow):
@@ -428,6 +452,7 @@ namespace Microsoft.PowerShell
             case nameof(Undo):
             case nameof(UndoAll):
             case nameof(UnixWordRubout):
+            case nameof(UpcaseWord):
             case nameof(ValidateAndAcceptLine):
             case nameof(ViAcceptLine):
             case nameof(ViAcceptLineOrExit):
@@ -538,6 +563,14 @@ namespace Microsoft.PowerShell
             case nameof(ViTabCompletePrevious):
                 return KeyHandlerGroup.Completion;
 
+            case nameof(AcceptSuggestion):
+            case nameof(AcceptNextSuggestionWord):
+            case nameof(NextSuggestion):
+            case nameof(PreviousSuggestion):
+            case nameof(SwitchPredictionView):
+            case nameof(ShowFullPredictionTooltip):
+                return KeyHandlerGroup.Prediction;
+
             case nameof(CaptureScreen):
             case nameof(ClearScreen):
             case nameof(DigitArgument):
@@ -555,12 +588,10 @@ namespace Microsoft.PowerShell
             case nameof(ViEditVisually):
             case nameof(ViExit):
             case nameof(ViInsertMode):
+            case nameof(ViDGChord):
             case nameof(WhatIsKey):
-            case nameof(AcceptSuggestion):
-            case nameof(AcceptNextSuggestionWord):
-            case nameof(NextSuggestion):
-            case nameof(PreviousSuggestion):
-            case nameof(SwitchPredictionView):
+            case nameof(ShowCommandHelp):
+            case nameof(ShowParameterHelp):
                 return KeyHandlerGroup.Miscellaneous;
 
             case nameof(CharacterSearch):
@@ -589,6 +620,7 @@ namespace Microsoft.PowerShell
             case nameof(SelectShellBackwardWord):
             case nameof(SelectShellForwardWord):
             case nameof(SelectShellNextWord):
+            case nameof(SelectCommandArgument):
                 return KeyHandlerGroup.Selection;
 
             default:
@@ -635,7 +667,7 @@ namespace Microsoft.PowerShell
             }
 
             // Don't overwrite any of the line - so move to first line after the end of our buffer.
-            var point = _singleton.ConvertOffsetToPoint(_singleton._buffer.Length);
+            var point = _singleton.EndOfBufferPosition();
             console.SetCursorPosition(point.X, point.Y);
             console.Write("\n");
 
@@ -692,7 +724,7 @@ namespace Microsoft.PowerShell
 
             var console = _singleton._console;
             // Don't overwrite any of the line - so move to first line after the end of our buffer.
-            var point = _singleton.ConvertOffsetToPoint(_singleton._buffer.Length);
+            var point = _singleton.EndOfBufferPosition();
             console.SetCursorPosition(point.X, point.Y);
             console.Write("\n");
 

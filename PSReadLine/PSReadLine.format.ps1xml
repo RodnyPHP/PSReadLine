@@ -145,6 +145,9 @@ $d = [Microsoft.PowerShell.KeyHandler]::GetGroupingDescription($_.Group)
                 <PropertyName>ShowToolTips</PropertyName>
               </ListItem>
               <ListItem>
+                <PropertyName>ScreenReaderModeEnabled</PropertyName>
+              </ListItem>
+              <ListItem>
                 <PropertyName>ViModeIndicator</PropertyName>
               </ListItem>
               <ListItem>
@@ -163,6 +166,9 @@ $d = [Microsoft.PowerShell.KeyHandler]::GetGroupingDescription($_.Group)
               </ListItem>
               <ListItem>
                 <PropertyName>PredictionViewStyle</PropertyName>
+              </ListItem>
+              <ListItem>
+                <PropertyName>TerminateOrphanedConsoleApps</PropertyName>
               </ListItem>
               <ListItem>
                 <Label>CommandColor</Label>
@@ -203,6 +209,10 @@ $d = [Microsoft.PowerShell.KeyHandler]::GetGroupingDescription($_.Group)
               <ListItem>
                 <Label>ListPredictionSelectedColor</Label>
                 <ScriptBlock>[Microsoft.PowerShell.VTColorUtils]::FormatColor($_.ListPredictionSelectedColor)</ScriptBlock>
+              </ListItem>
+              <ListItem>
+                <Label>ListPredictionTooltipColor</Label>
+                <ScriptBlock>[Microsoft.PowerShell.VTColorUtils]::FormatColor($_.ListPredictionTooltipColor)</ScriptBlock>
               </ListItem>
               <ListItem>
                 <Label>MemberColor</Label>

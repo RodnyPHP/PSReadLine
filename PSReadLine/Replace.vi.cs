@@ -65,7 +65,13 @@ namespace Microsoft.PowerShell
             {
                 _singleton.StartEditGroup();
                 string insStr = _singleton._buffer.ToString(startingCursor, _singleton._current - startingCursor);
-                _singleton.SaveEditItem(EditItemDelete.Create(deletedStr.ToString(), startingCursor));
+                _singleton.SaveEditItem(EditItemDelete.Create(
+                    deletedStr.ToString(),
+                    startingCursor,
+                    ViReplaceUntilEsc,
+                    arg,
+                    moveCursorToEndWhenUndo: false));
+
                 _singleton.SaveEditItem(EditItemInsertString.Create(insStr, startingCursor));
                 _singleton.EndEditGroup();
             }
@@ -155,7 +161,7 @@ namespace Microsoft.PowerShell
                 && !_singleton.IsDelimiter(_singleton._lastWordDelimiter, _singleton.Options.WordDelimiters)
                 && _singleton._shouldAppend)
             {
-                ViInsertWithAppend(key, arg);
+                ViInsertWithAppendImpl(key, arg);
             }
             else
             {
@@ -174,7 +180,7 @@ namespace Microsoft.PowerShell
             }
             if (_singleton._current == _singleton._buffer.Length - 1)
             {
-                ViInsertWithAppend(key, arg);
+                ViInsertWithAppendImpl(key, arg);
             }
             else
             {
@@ -188,7 +194,7 @@ namespace Microsoft.PowerShell
             DeleteEndOfWord(key, arg);
             if (_singleton._current == _singleton._buffer.Length - 1)
             {
-                ViInsertWithAppend(key, arg);
+                ViInsertWithAppendImpl(key, arg);
             }
             else
             {
@@ -202,7 +208,7 @@ namespace Microsoft.PowerShell
             ViDeleteEndOfGlob(key, arg);
             if (_singleton._current == _singleton._buffer.Length - 1)
             {
-                ViInsertWithAppend(key, arg);
+                ViInsertWithAppendImpl(key, arg);
             }
             else
             {
@@ -226,7 +232,13 @@ namespace Microsoft.PowerShell
             if (_singleton._buffer.Length > 0 && nextKey.KeyStr.Length == 1)
             {
                 _singleton.StartEditGroup();
-                _singleton.SaveEditItem(EditItemDelete.Create(_singleton._buffer[_singleton._current].ToString(), _singleton._current));
+                _singleton.SaveEditItem(EditItemDelete.Create(
+                    _singleton._buffer[_singleton._current].ToString(),
+                    _singleton._current,
+                    ReplaceCharInPlace,
+                    arg,
+                    moveCursorToEndWhenUndo: false));
+
                 _singleton.SaveEditItem(EditItemInsertString.Create(nextKey.KeyStr, _singleton._current));
                 _singleton.EndEditGroup();
 
@@ -258,12 +270,16 @@ namespace Microsoft.PowerShell
             {
                 if (_singleton._current < initialCurrent || _singleton._current >= _singleton._buffer.Length)
                 {
-                    ViInsertWithAppend(key, arg);
+                    ViInsertWithAppendImpl(key, arg);
                 }
                 else
                 {
                     ViInsertMode(key, arg);
                 }
+            }
+            else
+            {
+                _singleton._groupUndoHelper.EndGroup();
             }
         }
 
@@ -282,6 +298,10 @@ namespace Microsoft.PowerShell
             if (ViCharacterSearcher.SearchBackwardDelete(keyChar, arg, backoff: false, instigator: (_key, _arg) => ViReplaceToCharBack(keyChar, _key, _arg)))
             {
                 ViInsertMode(key, arg);
+            }
+            else
+            {
+                _singleton._groupUndoHelper.EndGroup();
             }
         }
 
@@ -302,6 +322,10 @@ namespace Microsoft.PowerShell
             {
                 ViInsertMode(key, arg);
             }
+            else
+            {
+                _singleton._groupUndoHelper.EndGroup();
+            }
         }
 
         /// <summary>
@@ -320,8 +344,10 @@ namespace Microsoft.PowerShell
             {
                 ViInsertMode(key, arg);
             }
+            else
+            {
+                _singleton._groupUndoHelper.EndGroup();
+            }
         }
-
-
     }
 }

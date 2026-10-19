@@ -182,7 +182,6 @@ namespace Test
 
             // Make sure <ENTER> when input is incomplete actually puts a newline
             // wherever the cursor is.
-            var continationPrefixLength = PSConsoleReadLineOptions.DefaultContinuationPrompt.Length;
             Test("{\n\nd\n}", Keys(
                 '{',
                 _.Enter,      CheckThat(() => AssertCursorTopIs(1)),
@@ -190,8 +189,8 @@ namespace Test
                 _.Enter,      CheckThat(() => AssertCursorTopIs(2)),
                 _.Home,
                 _.RightArrow, CheckThat(() => AssertCursorLeftTopIs(1, 0)),
-                _.Enter,      CheckThat(() => AssertCursorLeftTopIs(continationPrefixLength, 1)),
-                _.End,        CheckThat(() => AssertCursorLeftTopIs(continationPrefixLength, 3)),
+                _.Enter,      CheckThat(() => AssertCursorLeftTopIs(ContinuationPromptLength, 1)),
+                _.End,        CheckThat(() => AssertCursorLeftTopIs(ContinuationPromptLength, 3)),
                 '}'));
 
             // Make sure <ENTER> when input successfully parses accepts the input regardless
@@ -201,6 +200,69 @@ namespace Test
                 "{\n}",
                 _.Home,
                 _.Enter, CheckThat(() => AssertCursorLeftTopIs(0, 2))));
+        }
+
+        [SkippableFact]
+        public void MultiLine_ScreenCheck()
+        {
+            Skip.If(ScreenReaderModeEnabled, "Continuation prompt is not supported in screen reader mode.");
+
+            TestSetup(KeyMode.Cmd);
+
+            var defaultContinuationPrompt = PSConsoleReadLineOptions.DefaultContinuationPrompt;
+            var defaultContinuationPromptColors = Tuple.Create(_console.ForegroundColor, _console.BackgroundColor);
+
+            Test("@'\n\n hello\n\n world\n'@",
+                 Keys(
+                    "@'",     _.Enter, _.Enter,
+                    " hello", _.Enter, _.Enter,
+                    " world", _.Enter, "'@",
+                        CheckThat(() => AssertScreenIs(6,
+                            TokenClassification.String, "@'",
+                            NextLine,
+                            defaultContinuationPromptColors, defaultContinuationPrompt,
+                            NextLine,
+                            defaultContinuationPromptColors, defaultContinuationPrompt,
+                            TokenClassification.String, " hello",
+                            NextLine,
+                            defaultContinuationPromptColors, defaultContinuationPrompt,
+                            NextLine,
+                            defaultContinuationPromptColors, defaultContinuationPrompt,
+                            TokenClassification.String, " world",
+                            NextLine,
+                            defaultContinuationPromptColors, defaultContinuationPrompt,
+                            TokenClassification.String, "'@"))
+                 ));
+
+            // Set the continuation prompt to be an empty string.
+            var setOption = new SetPSReadLineOption { ContinuationPrompt = string.Empty };
+            PSConsoleReadLine.SetOptions(setOption);
+
+            try
+            {
+                Test("@'\n\n hello\n\n world\n'@",
+                     Keys(
+                        "@'", _.Enter, _.Enter,
+                        " hello", _.Enter, _.Enter,
+                        " world", _.Enter, "'@",
+                            CheckThat(() => AssertScreenIs(6,
+                                TokenClassification.String, "@'",
+                                NextLine,
+                                NextLine,
+                                TokenClassification.String, " hello",
+                                NextLine,
+                                NextLine,
+                                TokenClassification.String, " world",
+                                NextLine,
+                                TokenClassification.String, "'@"))
+                 ));
+            }
+            finally
+            {
+                // Restore to the default continuation prompt.
+                setOption.ContinuationPrompt = defaultContinuationPrompt;
+                PSConsoleReadLine.SetOptions(setOption);
+            }
         }
 
         [SkippableFact]
@@ -245,8 +307,16 @@ namespace Test
                 CheckThat(() => AssertScreenIs(1,
                     Tuple.Create(_console.ForegroundColor, _console.BackgroundColor), "PSREADLINE> ",
                     TokenClassification.Command, "dir"))));
+        }
 
-            // Tricky prompt - writes to console directly with colors, uses ^H trick to eliminate trailng space.
+        [SkippableFact]
+        public void InvokeTrickyPrompt()
+        {
+            Skip.If(ScreenReaderModeEnabled, "We can't test the colors written in this prompt in screen reader mode.");
+
+            TestSetup(KeyMode.Cmd, new KeyHandler("Ctrl+z", PSConsoleReadLine.InvokePrompt));
+
+            // Tricky prompt - writes to console directly with colors, uses ^H trick to eliminate trailing space.
             using (var ps = PowerShell.Create(RunspaceMode.CurrentRunspace))
             {
                 ps.AddCommand("New-Variable").AddParameter("Name", "__console").AddParameter("Value", _console).Invoke();

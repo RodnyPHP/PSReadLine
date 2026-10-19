@@ -23,6 +23,7 @@ namespace Microsoft.PowerShell
         private int _tabCommandCount;
         private CommandCompletion _tabCompletions;
         private Runspace _runspace;
+        private string _directorySeparator;
 
         private static readonly Dictionary<CompletionResultType, PSKeyInfo []> KeysEndingCompletion =
             new Dictionary<CompletionResultType, PSKeyInfo []>
@@ -40,7 +41,7 @@ namespace Microsoft.PowerShell
         private static readonly char[] EolChars = {'\r', '\n'};
 
         // String helper for directory paths
-        private static readonly string DirectorySeparatorString = System.IO.Path.DirectorySeparatorChar.ToString();
+        private static readonly string DefaultDirectorySeparator = System.IO.Path.DirectorySeparatorChar.ToString();
 
         // Stub helper method so completion can be mocked
         [ExcludeFromCodeCoverage]
@@ -205,7 +206,7 @@ namespace Microsoft.PowerShell
             if (InViInsertMode())   // must close out the current edit group before engaging menu completion
             {
                 ViCommandMode();
-                ViInsertWithAppend();
+                ViInsertWithAppendImpl();
             }
 
             // Do not show suggestion text during tab completion.
@@ -281,36 +282,49 @@ namespace Microsoft.PowerShell
                     System.Management.Automation.PowerShell ps;
                     if (!_mockableMethods.RunspaceIsRemote(_runspace))
                     {
+                        _directorySeparator ??= DefaultDirectorySeparator;
                         ps = System.Management.Automation.PowerShell.Create(RunspaceMode.CurrentRunspace);
                     }
                     else
                     {
+                        if (_directorySeparator is null)
+                        {
+                            // Use the default separator by default.
+                            _directorySeparator = DefaultDirectorySeparator;
+                            PSPrimitiveDictionary dict = _runspace.GetApplicationPrivateData();
+
+                            if (dict["PSVersionTable"] is PSPrimitiveDictionary versionTable)
+                            {
+                                // If the 'Platform' key is available and its value is not 'Win*', then the server side is macOS or Linux.
+                                // In that case, we use the forward slash '/' as the directory separator.
+                                // Otherwise, the server side is Windows and we use the backward slash '\' instead.
+                                _directorySeparator = versionTable["Platform"] is string platform && !platform.StartsWith("Win", StringComparison.Ordinal) ? "/" : @"\";
+                            }
+                        }
+
                         ps = System.Management.Automation.PowerShell.Create();
                         ps.Runspace = _runspace;
                     }
-                    _tabCompletions = _mockableMethods.CompleteInput(_buffer.ToString(), _current, null, ps);
 
-                    if (_tabCompletions.CompletionMatches.Count == 0) return null;
+                    _tabCompletions = _mockableMethods.CompleteInput(_buffer.ToString(), _current, null, ps);
+                    if (_tabCompletions.CompletionMatches.Count == 0)
+                    {
+                        return null;
+                    }
 
                     // Validate the replacement index/length - if we can't do
                     // the replacement, we'll ignore the completions.
                     var start = _tabCompletions.ReplacementIndex;
                     var length = _tabCompletions.ReplacementLength;
-                    if (start < 0 || start > _singleton._buffer.Length) return null;
-                    if (length < 0 || length > (_singleton._buffer.Length - start)) return null;
 
-                    if (_tabCompletions.CompletionMatches.Count > 1)
+                    if (start < 0 || start > _singleton._buffer.Length)
                     {
-                        // Filter out apparent duplicates
-                        var hashSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                        return null;
+                    }
 
-                        foreach (var match in _tabCompletions.CompletionMatches.ToArray())
-                        {
-                            if (!hashSet.Add(match.ListItemText))
-                            {
-                                _tabCompletions.CompletionMatches.Remove(match);
-                            }
-                        }
+                    if (length < 0 || length > (_singleton._buffer.Length - start))
+                    {
+                        return null;
                     }
                 }
                 catch (Exception)
@@ -378,12 +392,12 @@ namespace Microsoft.PowerShell
             completions.ReplacementLength = replacementText.Length;
         }
 
-        private static string GetReplacementTextForDirectory(string replacementText, ref int cursorAdjustment)
+        private string GetReplacementTextForDirectory(string replacementText, ref int cursorAdjustment)
         {
-            if (!replacementText.EndsWith(DirectorySeparatorString , StringComparison.Ordinal))
+            if (!replacementText.EndsWith(_directorySeparator , StringComparison.Ordinal))
             {
-                if (replacementText.EndsWith(String.Format("{0}\'", DirectorySeparatorString), StringComparison.Ordinal) ||
-                    replacementText.EndsWith(String.Format("{0}\"", DirectorySeparatorString), StringComparison.Ordinal))
+                if (replacementText.EndsWith(string.Format("{0}\'", _directorySeparator), StringComparison.Ordinal) ||
+                    replacementText.EndsWith(string.Format("{0}\"", _directorySeparator), StringComparison.Ordinal))
                 {
                     cursorAdjustment = -1;
                 }
@@ -391,12 +405,12 @@ namespace Microsoft.PowerShell
                          replacementText.EndsWith("\"", StringComparison.Ordinal))
                 {
                     var len = replacementText.Length;
-                    replacementText = replacementText.Substring(0, len - 1) + System.IO.Path.DirectorySeparatorChar + replacementText[len - 1];
+                    replacementText = replacementText.Substring(0, len - 1) + _directorySeparator + replacementText[len - 1];
                     cursorAdjustment = -1;
                 }
                 else
                 {
-                    replacementText = replacementText + System.IO.Path.DirectorySeparatorChar;
+                    replacementText += _directorySeparator;
                 }
             }
             return replacementText;
@@ -422,17 +436,15 @@ namespace Microsoft.PowerShell
             return s;
         }
 
-        private class Menu
+        private class Menu : DisplayBlockBase
         {
-            internal PSConsoleReadLine Singleton;
-            internal int Top;
-
             internal int PreviousTop;
             internal int ColumnWidth;
             internal int BufferLines;
             internal int Rows;
             internal int Columns;
             internal int ToolTipLines;
+
             internal Collection<CompletionResult> MenuItems;
             internal CompletionResult CurrentMenuItem => MenuItems[CurrentSelection];
             internal int CurrentSelection;
@@ -447,15 +459,8 @@ namespace Microsoft.PowerShell
                     SaveCursor();
                 }
 
-                // Move cursor to the start of the first line after our input.
-                var bufferEndPoint = Singleton.ConvertOffsetToPoint(Singleton._buffer.Length);
-                console.SetCursorPosition(bufferEndPoint.X, bufferEndPoint.Y);
-                // Top must be initialized before calling AdjustForPossibleScroll, otherwise
-                // on the last line of the buffer, the scroll operation causes Top to point
-                // past the buffer, which in turn causes the menu to be printed twice.
-                this.Top = bufferEndPoint.Y + 1;
-                AdjustForPossibleScroll(1);
-                MoveCursorDown(1);
+                PreviousTop = Top;
+                MoveCursorToStartDrawingPosition(console);
 
                 var bufferWidth = console.BufferWidth;
                 var columnWidth = this.ColumnWidth;
@@ -515,28 +520,26 @@ namespace Microsoft.PowerShell
                     }
                 }
 
-                // if the menu has moved, we need to clear the lines under it
-                if (bufferEndPoint.Y < PreviousTop)
-                {
-                    // In either of the following two cases, we will need to move the cursor to the next line:
-                    //  - if extra rows from previous menu were cleared, then we know the current line was erased
-                    //    but the cursor was not moved to the next line.
-                    //  - if 'CursorLeft != 0', then the rest of the last menu row was erased, but the cursor
-                    //    was not moved to the next line.
-                    if (extraPreRowsCleared || console.CursorLeft != 0)
-                    {
-                        // There are lines from the previous rendering that need to be cleared,
-                        // so we are sure there is no need to scroll.
-                        MoveCursorDown(1);
-                    }
-
-                    Singleton.WriteBlankLines(PreviousTop - bufferEndPoint.Y);
-                }
-
-                PreviousTop = bufferEndPoint.Y;
-
                 if (menuSelect)
                 {
+                    // if the menu has moved, we need to clear the lines under it
+                    if (Top < PreviousTop)
+                    {
+                        // In either of the following two cases, we will need to move the cursor to the next line:
+                        //  - if extra rows from previous menu were cleared, then we know the current line was erased
+                        //    but the cursor was not moved to the next line.
+                        //  - if 'CursorLeft != 0', then the rest of the last menu row was erased, but the cursor
+                        //    was not moved to the next line.
+                        if (extraPreRowsCleared || console.CursorLeft != 0)
+                        {
+                            // There are lines from the previous rendering that need to be cleared,
+                            // so we are sure there is no need to scroll.
+                            MoveCursorDown(1);
+                        }
+
+                        Singleton.WriteBlankLines(PreviousTop - Top);
+                    }
+
                     RestoreCursor();
                     console.CursorVisible = true;
                 }
@@ -572,6 +575,7 @@ namespace Microsoft.PowerShell
                     // Determine if showing the tooltip would scroll the top of our buffer off the screen.
 
                     int lineLength = 0;
+                    bool fullLine = false;
                     for (var i = 0; i < toolTip.Length; i++)
                     {
                         char c = toolTip[i];
@@ -583,8 +587,13 @@ namespace Microsoft.PowerShell
 
                         if (c == '\r' || c == '\n')
                         {
-                            toolTipLines += 1;
-                            lineLength = 0;
+                            // If we happened to have a full line right before the newline character, then we
+                            // skip this newline character because we already increased the line count.
+                            if (!fullLine)
+                            {
+                                toolTipLines += 1;
+                                lineLength = 0;
+                            }
                         }
                         else
                         {
@@ -593,8 +602,14 @@ namespace Microsoft.PowerShell
                             {
                                 toolTipLines += 1;
                                 lineLength = 0;
+
+                                // Indicate that we just had a full line.
+                                fullLine = true;
+                                continue;
                             }
                         }
+
+                        fullLine = false;
                     }
 
                     // The +1 is for the blank line between the menu and tooltips.
@@ -701,39 +716,6 @@ namespace Microsoft.PowerShell
                     CurrentSelection += MenuItems.Count;
                 }
             }
-
-            private void MoveCursorDown(int cnt)
-            {
-                IConsole console = Singleton._console;
-                while (cnt-- > 0)
-                {
-                    console.Write("\n");
-                }
-            }
-
-            private void AdjustForPossibleScroll(int cnt)
-            {
-                IConsole console = Singleton._console;
-                var scrollCnt = console.CursorTop + cnt + 1 - console.BufferHeight;
-                if (scrollCnt > 0)
-                {
-                    Top -= scrollCnt;
-                    _singleton._initialY -= scrollCnt;
-                    _savedCursorTop -= scrollCnt;
-                }
-            }
-
-            private int _savedCursorLeft;
-            private int _savedCursorTop;
-
-            public void SaveCursor()
-            {
-                IConsole console = Singleton._console;
-                _savedCursorLeft = console.CursorLeft;
-                _savedCursorTop = console.CursorTop;
-            }
-
-            public void RestoreCursor() => Singleton._console.SetCursorPosition(_savedCursorLeft, _savedCursorTop);
         }
 
         private Menu CreateCompletionMenu(Collection<CompletionResult> matches)
@@ -832,7 +814,7 @@ namespace Microsoft.PowerShell
             }
             else
             {
-                menu.DrawMenu(null, menuSelect:false);
+                menu.DrawMenu(null, menuSelect: false);
                 InvokePrompt(key: null, arg: _console.CursorTop);
             }
         }
@@ -911,10 +893,10 @@ namespace Microsoft.PowerShell
                         // getting shorter or longer.
                         var endOfCommandLine = ConvertOffsetToPoint(_buffer.Length);
                         var topAdjustment = (endOfCommandLine.Y + 1) - menu.Top;
+                        int oldInitialY = _initialY;
 
                         if (topAdjustment != 0)
                         {
-                            menu.Top += topAdjustment;
                             menu.DrawMenu(null, menuSelect: true);
                         }
                         if (topAdjustment > 0)
@@ -922,6 +904,14 @@ namespace Microsoft.PowerShell
                             // Render did not clear the rest of the command line which flowed
                             // into the menu, so we must do that here.
                             menu.SaveCursor();
+
+                            if (oldInitialY > _initialY)
+                            {
+                                // Scrolling happened when drawing the menu, so we need to adjust
+                                // this point as it was calculated before drawing the menu.
+                                endOfCommandLine.Y -= oldInitialY - _initialY;
+                            }
+
                             _console.SetCursorPosition(endOfCommandLine.X, endOfCommandLine.Y);
                             _console.Write(Spaces(_console.BufferWidth - endOfCommandLine.X));
                             menu.RestoreCursor();
@@ -996,14 +986,25 @@ namespace Microsoft.PowerShell
                     // TODO: Shift + Backspace does not fail here?
                     if (menuStack.Count > 1)
                     {
-                        var newMenu = menuStack.Pop();
-
-                        newMenu.DrawMenu(menu, menuSelect:true);
                         previousSelection = -1;
-
-                        menu = newMenu;
-
                         userCompletionText = userCompletionText.Substring(0, userCompletionText.Length - 1);
+
+                        Menu newMenu = menuStack.Peek();
+                        int pos = FindUserCompletionTextPosition(newMenu.CurrentMenuItem, userCompletionText);
+                        if (pos >= 0)
+                        {
+                            newMenu = menuStack.Pop();
+                            newMenu.DrawMenu(menu, menuSelect: true);
+
+                            menu = newMenu;
+                        }
+                        // else {
+                        //     We should not pop the stack yet. The updated user completion text contains characters
+                        //     that are not included in the selected item of the menu at the top of stack. This may
+                        //     happen when the user pressed a 'Tab' before this 'Backspace', which updated the user
+                        //     completion text to include the unambiguous common prefix of the available completion
+                        //     candidates. In this case, we should stay in the current menu.
+                        // }
                     }
                     else if (menuStack.Count == 1)
                     {
@@ -1060,7 +1061,7 @@ namespace Microsoft.PowerShell
                         {
                             var newMenu = CreateCompletionMenu(newMatches);
 
-                            newMenu.DrawMenu(menu, menuSelect:true);
+                            newMenu.DrawMenu(menu, menuSelect: true);
                             previousSelection = -1;
 
                             // Remember the current menu for when we see Backspace.
@@ -1092,7 +1093,7 @@ namespace Microsoft.PowerShell
                         processingKeys = false;
                         prependNextKey = true;
 
-                        // without this branch experience doesnt look naturally
+                        // without this branch experience doesn't look naturally
                         if (_dispatchTable.TryGetValue(nextKey, out var handler) &&
                             (
                                 handler.Action == CopyOrCancelLine ||
